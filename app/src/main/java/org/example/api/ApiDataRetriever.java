@@ -1,6 +1,7 @@
 package org.example.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.model.Workflow;
 import org.example.model.WorkflowJob;
 import org.example.model.WorkflowRun;
 
@@ -36,21 +37,27 @@ public class ApiDataRetriever {
         this(repo, owner, token, 100);
     }
 
+    public List<Workflow> getWorkflows() throws Exception {
+        final String workflowsLink = String.format("%s/repos/%s/%s/actions/workflows", API_BASE_URL, owner, repo);
+        HttpRequest.Builder builder = getPaginatedRequestBuilder(workflowsLink);
+        return executePaginatedRequest(builder, WorkflowsDataContract.class);
+    }
+
     public List<WorkflowRun> getQueuedWorkflowRuns() throws Exception {
         final String workflowLink = String.format("%s/repos/%s/%s/actions/runs", API_BASE_URL, owner, repo);
-        HttpRequest.Builder builder = getBaseRequestBuilder(workflowLink).header("status", "queued");
+        HttpRequest.Builder builder = getPaginatedRequestBuilder(workflowLink).header("status", "queued");
         return executePaginatedRequest(builder, WorkflowRunsDataContract.class);
     }
 
     public List<WorkflowRun> getActiveWorkflowRuns() throws Exception {
         final String workflowLink = String.format("%s/repos/%s/%s/actions/runs", API_BASE_URL, owner, repo);
-        HttpRequest.Builder builder = getBaseRequestBuilder(workflowLink).header("status", "in_progress");
+        HttpRequest.Builder builder = getPaginatedRequestBuilder(workflowLink).header("status", "in_progress");
         return executePaginatedRequest(builder, WorkflowRunsDataContract.class);
     }
 
     public List<WorkflowRun> getWorkflowRunsFrom(String from) throws Exception {
         final String workflowLink = String.format("%s/repos/%s/%s/actions/runs", API_BASE_URL, owner, repo);
-        HttpRequest.Builder builder = getBaseRequestBuilder(workflowLink).header("created", ">="+from);
+        HttpRequest.Builder builder = getPaginatedRequestBuilder(workflowLink).header("created", ">="+from);
         return executePaginatedRequest(builder, WorkflowRunsDataContract.class);
     }
 
@@ -96,7 +103,11 @@ public class ApiDataRetriever {
                 .uri(URI.create(link))
                 .GET()
                 .header("Authorization", "Bearer " + token)
-                .header("Accept", "application/vnd.github+json")
+                .header("Accept", "application/vnd.github+json");
+    }
+
+    private HttpRequest.Builder getPaginatedRequestBuilder(String link) {
+        return getBaseRequestBuilder(link)
                 .header("per_page", String.valueOf(perPage));
     }
 }
