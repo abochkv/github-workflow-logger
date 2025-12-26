@@ -7,7 +7,7 @@ import java.time.Instant;
 
 public class Repository {
 
-    public boolean exists(String repo) {
+    public static boolean exists(String repo) {
         String sql = "SELECT 1 FROM connected_repos WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
@@ -22,7 +22,7 @@ public class Repository {
         }
     }
 
-    public void add(String repo) {
+    public static void add(String repo) {
         String sql = """
             INSERT OR IGNORE INTO connected_repos (repo, connected_at)
             VALUES (?, ?)
