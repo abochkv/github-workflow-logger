@@ -3,6 +3,7 @@ package org.example.model;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Objects;
 
 public class WorkflowRun {
     private long id;
@@ -48,6 +49,21 @@ public class WorkflowRun {
 
     @JsonProperty("run_attempt")
     private int runAttempt;
+
+    @Override
+    public boolean equals(Object obj) {
+        if (obj == this) return true;
+        return (obj instanceof WorkflowRun)
+                && (getId() == ((WorkflowRun) obj).getId())
+                && getWorkflowId() == ((WorkflowRun) obj).getWorkflowId()
+                && getRunNumber() == ((WorkflowRun) obj).getRunNumber()
+                && getRunAttempt() == ((WorkflowRun) obj).getRunAttempt();
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(getId(), getWorkflowId(), getRunNumber(), getRunAttempt());
+    }
 
     // Getters and setters
     public long getId() { return id; }

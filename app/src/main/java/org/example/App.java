@@ -11,11 +11,16 @@ public class App {
         final String token = args[1];
 
         WorkflowLogger logger = new WorkflowLogger(repo, token);
-
-        if (Repository.exists(repo)) {
-            logger.handleExistingRepository();
-        } else {
-            logger.handleNewRepository();
+        try {
+            if (Repository.exists(repo)) {
+                logger.handleExistingRepository(Repository.getConnectedAt(repo));
+            } else {
+                Repository.add(repo);
+                logger.handleNewRepository();
+            }
+        }
+        catch (Exception e) {
+            e.printStackTrace();
         }
     }
 }
