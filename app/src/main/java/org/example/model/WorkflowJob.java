@@ -2,6 +2,8 @@ package org.example.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.OffsetDateTime;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -29,7 +31,7 @@ public class WorkflowJob {
     private String htmlUrl;
 
     private Status status;
-    private String conclusion;
+    private Conclusion conclusion;
 
     @JsonProperty("created_at")
     private OffsetDateTime createdAt;
@@ -82,6 +84,19 @@ public class WorkflowJob {
 
     // --- Getters and Setters ---
 
+    private boolean areStepsSorted = false;
+    public List<JobStep> getSortedSteps() {
+        if (this.steps == null) return Collections.emptyList();
+        if (areStepsSorted) return this.steps;
+
+        this.steps.sort(Comparator.comparingInt(JobStep::getNumber));
+        areStepsSorted = true;
+
+        return this.steps;
+    }
+
+    public void setSteps(List<JobStep> steps) { this.steps = steps; }
+
     public long getId() { return id; }
     public void setId(long id) { this.id = id; }
 
@@ -106,8 +121,8 @@ public class WorkflowJob {
     public Status getStatus() { return status; }
     public void setStatus(Status status) { this.status = status; }
 
-    public String getConclusion() { return conclusion; }
-    public void setConclusion(String conclusion) { this.conclusion = conclusion; }
+    public Conclusion getConclusion() { return conclusion; }
+    public void setConclusion(Conclusion conclusion) { this.conclusion = conclusion; }
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
@@ -120,9 +135,6 @@ public class WorkflowJob {
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
-
-    public List<JobStep> getSteps() { return steps; }
-    public void setSteps(List<JobStep> steps) { this.steps = steps; }
 
     public String getCheckRunUrl() { return checkRunUrl; }
     public void setCheckRunUrl(String checkRunUrl) { this.checkRunUrl = checkRunUrl; }

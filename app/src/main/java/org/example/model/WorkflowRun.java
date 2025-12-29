@@ -28,7 +28,7 @@ public class WorkflowRun {
 
     private String event;
     private Status status;
-    private String conclusion;
+    private Conclusion conclusion;
 
     @JsonProperty("workflow_id")
     private long workflowId;
@@ -96,8 +96,8 @@ public class WorkflowRun {
     public Status getStatus() { return status; }
     public void setStatus(Status status) { this.status = status; }
 
-    public String getConclusion() { return conclusion; }
-    public void setConclusion(String conclusion) { this.conclusion = conclusion; }
+    public Conclusion getConclusion() { return conclusion; }
+    public void setConclusion(Conclusion conclusion) { this.conclusion = conclusion; }
 
     public long getWorkflowId() { return workflowId; }
     public void setWorkflowId(long workflowId) { this.workflowId = workflowId; }

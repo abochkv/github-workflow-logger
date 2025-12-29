@@ -28,5 +28,5 @@ public enum Conclusion {
     STALE,
 
     @JsonProperty("startup_failure")
-    STARTUP_FAILURE;
+    STARTUP_FAILURE
 }

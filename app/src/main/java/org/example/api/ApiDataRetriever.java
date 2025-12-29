@@ -57,7 +57,7 @@ public class ApiDataRetriever {
 
     public List<WorkflowRun> getWorkflowRunsFrom(String from) throws Exception {
         final String workflowLink = String.format("%s/repos/%s/%s/actions/runs", API_BASE_URL, owner, repo);
-        HttpRequest.Builder builder = getPaginatedRequestBuilder(workflowLink).header("created", ">="+from);
+        HttpRequest.Builder builder = getPaginatedRequestBuilder(workflowLink).header("updated", ">="+from);
         return executePaginatedRequest(builder, WorkflowRunsDataContract.class);
     }
 
@@ -70,19 +70,21 @@ public class ApiDataRetriever {
     private <T extends CountableDataContract<U>, U> List<U> executePaginatedRequest(HttpRequest.Builder builder, Class<T> requestAs)
             throws Exception {
         int page = 1;
-        int currentCount;
-        List<U> items = new ArrayList<>();
-        do {
+        List<U> allItems = new ArrayList<>();
+        while (true) {
             HttpRequest request = builder.header("page", String.valueOf(page)).build();
 
             CountableDataContract<U> data = objectMapper.readValue(
                     executeRequest(request).body(), requestAs);
 
-            currentCount = data.getTotalCount();
-            items.addAll(data.getItems());
+            List<U> pageItems = data.getItems();
+            allItems.addAll(data.getItems());
             page++;
-        } while (currentCount == perPage);
-        return items;
+            if (pageItems.size() < perPage || allItems.size() >= data.getTotalCount()) {
+                break;
+            }
+        }
+        return allItems;
     }
 
     private HttpResponse<String> executeRequest(HttpRequest request) throws Exception {
