@@ -27,7 +27,7 @@ public class WorkflowRun {
     private int runNumber;
 
     private String event;
-    private String status;
+    private Status status;
     private String conclusion;
 
     @JsonProperty("workflow_id")
@@ -93,8 +93,8 @@ public class WorkflowRun {
     public String getEvent() { return event; }
     public void setEvent(String event) { this.event = event; }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    public Status getStatus() { return status; }
+    public void setStatus(Status status) { this.status = status; }
 
     public String getConclusion() { return conclusion; }
     public void setConclusion(String conclusion) { this.conclusion = conclusion; }

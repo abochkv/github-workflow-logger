@@ -7,13 +7,13 @@ import java.time.Instant;
 
 public class Repository {
 
-    public static boolean exists(String repo) {
+    public static boolean exists(String repo, String owner) {
         String sql = "SELECT 1 FROM connected_repos WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, repo);
+            ps.setString(1, repo + "/" + owner);
             ResultSet rs = ps.executeQuery();
             return rs.next();
 
@@ -22,7 +22,7 @@ public class Repository {
         }
     }
 
-    public static void add(String repo) {
+    public static void add(String repo, String owner) {
         String sql = """
             INSERT OR IGNORE INTO connected_repos (repo, connected_at)
             VALUES (?, ?)
@@ -31,7 +31,7 @@ public class Repository {
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, repo);
+            ps.setString(1, repo + "/" + owner);
             ps.setString(2, Instant.now().toString());
             ps.executeUpdate();
 
@@ -40,13 +40,13 @@ public class Repository {
         }
     }
 
-    public static String getConnectedAt(String repo) {
+    public static String getConnectedAt(String repo, String owner) {
         String sql = "SELECT connected_at FROM connected_repos WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, repo);
+            ps.setString(1, repo + "/" + owner);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return rs.getString("connected_at");
@@ -59,14 +59,14 @@ public class Repository {
         }
     }
 
-    public static void updateTimestamp(String repo) {
+    public static void updateTimestamp(String repo, String owner) {
         String sql = "UPDATE connected_repos SET connected_at = ? WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, Instant.now().toString());
-            ps.setString(2, repo);
+            ps.setString(2, repo + "/" + owner);
 
             ps.executeUpdate();
 

@@ -1,12 +1,8 @@
 package org.example.logic;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.api.ApiDataRetriever;
 import org.example.db.Repository;
-import org.example.model.JobStep;
-import org.example.model.Workflow;
-import org.example.model.WorkflowJob;
-import org.example.model.WorkflowRun;
+import org.example.model.*;
 
 import java.util.HashMap;
 import java.util.List;
@@ -14,13 +10,14 @@ import java.util.Map;
 
 public class WorkflowLogger {
     private final String owner;
+    private final String repo;
     private final ApiDataRetriever api;
     private final Map<Long, Workflow> existingWorkflows = new HashMap<>();
     private final Map<WorkflowRun, WorkflowJob> workflowRunToJobMap = new HashMap<>();
 
-    public WorkflowLogger(String repo, String token) {
-        this.owner = repo.split("/")[1];
-
+    public WorkflowLogger(String repo, String owner, String token) {
+        this.owner = owner;
+        this.repo = repo;
         this.api = new ApiDataRetriever(repo, owner, token);
 
         initWorkflows();
@@ -39,7 +36,7 @@ public class WorkflowLogger {
             List<WorkflowJob> jobs = api.getJobsForWorkflowRun(activeRun.getId());
 
             for (WorkflowJob job : jobs) {
-                if (job.getStatus().equals("in_progress") || job.getStatus().equals("queued"))
+                if (job.getStatus() == Status.IN_PROGRESS || job.getStatus() == Status.QUEUED)
                     System.out.println(formatJob(job));
             }
         }
@@ -53,7 +50,7 @@ public class WorkflowLogger {
         for (WorkflowRun workflowRun : workflowsSinceLast) {
             List<WorkflowJob> jobs;
             switch (workflowRun.getStatus()) {
-                case "completed":
+                case Status.COMPLETED:
                     System.out.println(formatCompletedWorkflow(workflowRun));
                     jobs = api.getJobsForWorkflowRun(workflowRun.getId());
 
@@ -65,14 +62,14 @@ public class WorkflowLogger {
                         }
                     }
                     break;
-                case "in_progress":
+                case Status.IN_PROGRESS:
                     System.out.println(formatRunningWorkflow(workflowRun));
                     jobs = api.getJobsForWorkflowRun(workflowRun.getId());
 
                     for (WorkflowJob job : jobs) {
-                        if (job.getStatus().equals("in_progress")
-                                || job.getStatus().equals("queued")
-                                || job.getStatus().equals("completed")) {
+                        if (job.getStatus() == Status.IN_PROGRESS
+                                || job.getStatus() == Status.QUEUED
+                                || job.getStatus() == Status.COMPLETED) {
                             System.out.println(formatJob(job));
 
                             for (JobStep step : job.getSteps()) {
@@ -81,14 +78,15 @@ public class WorkflowLogger {
                         }
                     }
                     break;
-                case "queued":
+                case Status.QUEUED:
                     System.out.println(formatQueuedWorkflowRun(workflowRun));
                     break;
                 default:
-                    System.out.println(formatFailedWorkflow(workflowRun));
+                    // no handling for other types
                     break;
             }
         }
+        Repository.updateTimestamp(this.repo, this.owner);
 
         pollingMode();
     }
@@ -107,7 +105,7 @@ public class WorkflowLogger {
                 .append(": ")
                 .append(queued.getStatus())
                 .append(" ")
-                .append("Commit SHA: ")
+                .append("Commit: ")
                 .append(queued.getHeadSha())
                 .append(" ")
                 .append("Branch: ")
@@ -128,17 +126,13 @@ public class WorkflowLogger {
                 .append("Branch: ")
                 .append(running.getHeadBranch())
                 .append(" ")
-                .append("Commit SHA: ")
+                .append("Commit: ")
                 .append(running.getHeadSha())
                 .append("\n");
         return queuedStr.toString();
     }
 
     private String formatCompletedWorkflow(WorkflowRun completed) {
-        return "";
-    }
-
-    private String formatFailedWorkflow(WorkflowRun failed) {
         return "";
     }
 

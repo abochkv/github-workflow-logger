@@ -28,7 +28,7 @@ public class WorkflowJob {
     @JsonProperty("html_url")
     private String htmlUrl;
 
-    private String status;
+    private Status status;
     private String conclusion;
 
     @JsonProperty("created_at")
@@ -103,8 +103,8 @@ public class WorkflowJob {
     public String getHtmlUrl() { return htmlUrl; }
     public void setHtmlUrl(String htmlUrl) { this.htmlUrl = htmlUrl; }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    public Status getStatus() { return status; }
+    public void setStatus(Status status) { this.status = status; }
 
     public String getConclusion() { return conclusion; }
     public void setConclusion(String conclusion) { this.conclusion = conclusion; }
