@@ -5,6 +5,8 @@ import org.example.db.Repository;
 import org.example.model.*;
 
 import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 public class WorkflowLogger {
     private final String owner;
@@ -79,27 +81,33 @@ public class WorkflowLogger {
     }
 
     private void checkForChanges() throws Exception {
-        List<WorkflowRun> queuedWorkflowRuns = api.getQueuedWorkflowRuns();
-        for (WorkflowRun queuedWorkflowRun : queuedWorkflowRuns) {
-            if (!this.queuedWorkflowRuns.contains(queuedWorkflowRun)) {
-                printWorkflowRun(queuedWorkflowRun);
+        // 1. Check Queued Runs
+        List<WorkflowRun> currentQueued = api.getQueuedWorkflowRuns();
+        for (WorkflowRun run : currentQueued) {
+            if (!this.queuedWorkflowRuns.contains(run)) {
+                printWorkflowRun(run);
             }
         }
         this.queuedWorkflowRuns.clear();
-        this.queuedWorkflowRuns.addAll(queuedWorkflowRuns);
+        this.queuedWorkflowRuns.addAll(currentQueued);
 
+        // 2. Check Active Runs
         List<WorkflowRun> activeWorkflows = api.getActiveWorkflowRuns();
 
-        for (WorkflowRun activeWorkflow : activeWorkflows) {
-            if (workflowRunToJobMap.containsKey(activeWorkflow)) { // the workflow was active and still active
-                checkForJobUpdatesForWorkflowRun(activeWorkflow);
-            } else { // new workflow run started
-                printWorkflowRun(activeWorkflow);
-                workflowRunToJobMap.put(activeWorkflow, new HashMap<>());
+        for (WorkflowRun activeRun : activeWorkflows) {
+            if (workflowRunToJobMap.containsKey(activeRun)) {
+                checkForJobUpdatesForWorkflowRun(activeRun);
+            } else {
+                // New Run Detected
+                printWorkflowRun(activeRun);
+                workflowRunToJobMap.put(activeRun, new HashMap<>());
 
-                for (WorkflowJob job : api.getJobsForWorkflowRun(activeWorkflow.getId())) {
-                    workflowRunToJobMap.get(activeWorkflow).put(job.getId(), job);
+                // Initialize jobs for the new run
+                List<WorkflowJob> initialJobs = api.getJobsForWorkflowRun(activeRun.getId());
+                for (WorkflowJob job : initialJobs) {
+                    workflowRunToJobMap.get(activeRun).put(job.getId(), job);
                     printWorkflowJob(job);
+
                     if (job.getStatus() == Status.IN_PROGRESS) {
                         for (JobStep step : job.getSortedSteps()) {
                             printWorkflowJobStep(step);
@@ -109,34 +117,74 @@ public class WorkflowLogger {
             }
         }
 
-        Set<WorkflowRun> activeWorkflowsSet = new HashSet<>(activeWorkflows);
+        // 3. Check Completed Runs
+        Set<WorkflowRun> activeSet = new HashSet<>(activeWorkflows);
+        Set<WorkflowRun> trackedRuns = new HashSet<>(workflowRunToJobMap.keySet());
 
-        Set<WorkflowRun> completedWorkflows = new HashSet<>(workflowRunToJobMap.keySet());
-        completedWorkflows.removeAll(activeWorkflowsSet);
+        // trackedRuns - activeSet = Completed Runs
+        trackedRuns.removeAll(activeSet);
 
-        for (WorkflowRun workflowRun : completedWorkflows) { // check for completed workflows
-            printCompletedWorkflow(workflowRun, workflowRunToJobMap.get(workflowRun).values().stream().toList());
-            workflowRunToJobMap.remove(workflowRun);
+        for (WorkflowRun completedRun : trackedRuns) {
+//            // Fetch final state (needed for 'conclusion')
+//            // Note: You might need to refresh the object if 'activeWorkflows' list didn't contain the completed version
+//            // But usually, if it disappears from active, we treat it as done.
+//            // Ideally, fetch the single run one last time to get the final 'conclusion' enum.
+//            WorkflowRun finalStateRun = api.getWorkflowRunById(completedRun.getId());
+//
+//            if (finalStateRun != null) {
+                printCompletedWorkflow(completedRun, new ArrayList<>(workflowRunToJobMap.get(completedRun).values()));
+//            }
+            workflowRunToJobMap.remove(completedRun);
         }
     }
 
     private void checkForJobUpdatesForWorkflowRun(WorkflowRun workflowRun) throws Exception {
-        List<WorkflowJob> jobs = api.getJobsForWorkflowRun(workflowRun.getId());
-        Map<Long, WorkflowJob> lastFetchedJobs = this.workflowRunToJobMap.get(workflowRun);
+        List<WorkflowJob> currentJobs = api.getJobsForWorkflowRun(workflowRun.getId());
+        Map<Long, WorkflowJob> cachedJobs = this.workflowRunToJobMap.get(workflowRun);
 
-        for (WorkflowJob job : jobs) {
-            List<JobStep> lastJobSteps =  lastFetchedJobs.get(job.getId()).getSortedSteps();
-            List<JobStep> currentJobSteps = job.getSortedSteps();
-            if (job.getStatus() != lastFetchedJobs.get(job.getId()).getStatus()) {
-                lastFetchedJobs.put(job.getId(), job);
-                printWorkflowJob(job);
+        for (WorkflowJob currentJob : currentJobs) {
+            WorkflowJob lastKnownJob = cachedJobs.get(currentJob.getId());
+
+            // FIX 1: Handle New Jobs (Matrix expansion)
+            // If the job wasn't in our map last time, it's new.
+            // Original code crashed here because lastKnownJob was null.
+            if (lastKnownJob == null) {
+                printWorkflowJob(currentJob);
+                cachedJobs.put(currentJob.getId(), currentJob);
+                // Print steps if they exist already
+                if (currentJob.getStatus() == Status.IN_PROGRESS) {
+                    currentJob.getSortedSteps().forEach(this::printWorkflowJobStep);
+                }
+                continue; // Skip the comparison logic for this loop
             }
 
-            for (int i = 0; i < lastJobSteps.size(); i++) {
-                if (lastJobSteps.get(i).getStatus() != currentJobSteps.get(i).getStatus()) {
-                    printWorkflowJobStep(currentJobSteps.get(i));
+            // Check for Status Change
+            if (currentJob.getStatus() != lastKnownJob.getStatus()) {
+                printWorkflowJob(currentJob);
+                cachedJobs.put(currentJob.getId(), currentJob);
+            }
+
+            // FIX 2: Handle Dynamic Steps
+            // We map the OLD steps by their Number (ID) for easy lookup.
+            Map<Integer, JobStep> oldStepMap = lastKnownJob.getSortedSteps().stream()
+                    .collect(Collectors.toMap(JobStep::getNumber, Function.identity()));
+
+            // We iterate the CURRENT steps. This ensures we catch new steps added by the runner.
+            for (JobStep currentStep : currentJob.getSortedSteps()) {
+                JobStep oldStep = oldStepMap.get(currentStep.getNumber());
+
+                // Scenario A: Step is brand new (Composite action expanded)
+                if (oldStep == null) {
+                    printWorkflowJobStep(currentStep);
+                }
+                // Scenario B: Step existed, check if status changed
+                else if (oldStep.getStatus() != currentStep.getStatus()) {
+                    printWorkflowJobStep(currentStep);
                 }
             }
+
+            // Update the cache with the fresh job object (containing the new steps list)
+            cachedJobs.put(currentJob.getId(), currentJob);
         }
     }
 
