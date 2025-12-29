@@ -9,6 +9,8 @@ import java.util.List;
 public class WorkflowRunsDataContract implements CountableDataContract<WorkflowRun> {
     @JsonProperty("total_count")
     int totalCount;
+
+    @JsonProperty("workflow_runs")
     List<WorkflowRun> runs;
 
     public List<WorkflowRun> getRuns() {

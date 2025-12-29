@@ -1,26 +1,53 @@
 package org.example;
 
-
 import org.example.db.Repository;
 import org.example.logic.WorkflowLogger;
 
 public class App {
-
     public static void main(String[] args) {
-        final String repo = args[0].split("/")[1];
-        final String owner = args[0].split("/")[0];
-        final String token = args[1];
+        if (args.length < 2) {
+            System.err.println("Usage: <url> <token>");
+            return;
+        }
+
+        String inputUrl = args[0];
+        String token = args[1];
+
+        // Remove protocol and trailing slashes for consistent splitting
+        String path = inputUrl.replace("https://", "")
+                .replace("http://", "")
+                .replace("github.com/", "");
+
+        if (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+
+        String[] parts = path.split("/");
+
+        if (parts.length < 2) {
+            System.err.println("Invalid GitHub URL. Expected format: owner/repo or github.com/owner/repo");
+            return;
+        }
+
+        final String owner = parts[0];
+        final String repo = parts[1];
+
+        System.out.println("Starting workflow logger for " + owner + "/" + repo);
 
         WorkflowLogger logger = new WorkflowLogger(repo, owner, token);
         try {
+            // Logic to register shutdown hook for clean exit
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                System.out.println("\nShutting down...");
+            }));
+
             if (Repository.exists(repo, owner)) {
                 logger.handleExistingRepository(Repository.getConnectedAt(repo, owner));
             } else {
                 Repository.add(repo, owner);
                 logger.handleNewRepository();
             }
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }

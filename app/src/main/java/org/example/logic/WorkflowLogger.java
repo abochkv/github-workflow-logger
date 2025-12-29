@@ -9,6 +9,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class WorkflowLogger {
+    private volatile boolean running = true;
+    private static final long POLL_INTERVAL_MS = 30_000;
     private final String owner;
     private final String repo;
     private final ApiDataRetriever api;
@@ -20,7 +22,10 @@ public class WorkflowLogger {
         this.owner = owner;
         this.repo = repo;
         this.api = new ApiDataRetriever(repo, owner, token);
-
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("\nStopping gracefully... please wait.");
+            this.running = false;
+        }));
         initWorkflows();
     }
 
@@ -77,7 +82,20 @@ public class WorkflowLogger {
     }
 
     private void pollingMode() throws Exception {
+        System.out.println("Started polling for changes (Press Ctrl+C to stop)...");
+        while (running) {
+            try {
+                checkForChanges();
+                Repository.updateTimestamp(this.repo, this.owner);
+            } catch (Exception e) {
+                System.err.println("Error during poll: " + e.getMessage());
+                e.printStackTrace();
+                // Optional: Break on fatal errors or continue on transient ones
+            }
 
+            // Sleep to preserve rate limit
+            Thread.sleep(POLL_INTERVAL_MS);
+        }
     }
 
     private void checkForChanges() throws Exception {
@@ -125,15 +143,15 @@ public class WorkflowLogger {
         trackedRuns.removeAll(activeSet);
 
         for (WorkflowRun completedRun : trackedRuns) {
-//            // Fetch final state (needed for 'conclusion')
-//            // Note: You might need to refresh the object if 'activeWorkflows' list didn't contain the completed version
-//            // But usually, if it disappears from active, we treat it as done.
-//            // Ideally, fetch the single run one last time to get the final 'conclusion' enum.
-//            WorkflowRun finalStateRun = api.getWorkflowRunById(completedRun.getId());
-//
-//            if (finalStateRun != null) {
-                printCompletedWorkflow(completedRun, new ArrayList<>(workflowRunToJobMap.get(completedRun).values()));
-//            }
+            // Fetch final state (needed for 'conclusion')
+            // Note: You might need to refresh the object if 'activeWorkflows' list didn't contain the completed version
+            // But usually, if it disappears from active, we treat it as done.
+            // Ideally, fetch the single run one last time to get the final 'conclusion' enum.
+            WorkflowRun finalStateRun = api.getWorkflowRunById(completedRun.getId());
+
+            if (finalStateRun != null) {
+                printCompletedWorkflow(finalStateRun, new ArrayList<>(workflowRunToJobMap.get(completedRun).values()));
+            }
             workflowRunToJobMap.remove(completedRun);
         }
     }
@@ -191,9 +209,8 @@ public class WorkflowLogger {
     private void printWorkflowRun(WorkflowRun workflowRun) {
         StringBuilder queuedStr = new StringBuilder();
         Workflow assosiatedWorkflow = existingWorkflows.get(workflowRun.getWorkflowId());
-        queuedStr.append("[Workflow] ").append(assosiatedWorkflow.getName());
-        queuedStr.append("\t")
-                .append("[RUN ")
+        queuedStr.append("[Workflow] ").append(assosiatedWorkflow.getName()).append("\n");
+        queuedStr.append("[RUN ")
                 .append(workflowRun.getStatus());
                 queuedStr.append("] ")
                 .append(workflowRun.getName())
@@ -228,8 +245,7 @@ public class WorkflowLogger {
     private void printWorkflowJob(WorkflowJob job) {
         StringBuilder queuedStr = new StringBuilder();
 
-        queuedStr.append("\t\t")
-                .append(job.getCompletedAt() == null ?
+        queuedStr.append(job.getCompletedAt() == null ?
                         (job.getStartedAt() == null ? job.getCreatedAt() : job.getStartedAt())
                         : job.getCompletedAt())
                 .append(" [Job ");
@@ -251,8 +267,7 @@ public class WorkflowLogger {
         }
 
         StringBuilder queuedStr = new StringBuilder();
-        queuedStr.append("\t\t\t")
-                .append(step.getCompletedAt() == null ? step.getStartedAt() : step.getCompletedAt())
+        queuedStr.append(step.getCompletedAt() == null ? step.getStartedAt() : step.getCompletedAt())
                 .append(" [Step ");
         if (step.getStatus() == Status.COMPLETED) {
             queuedStr.append(step.getConclusion());

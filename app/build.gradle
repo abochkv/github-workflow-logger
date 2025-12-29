@@ -18,6 +18,7 @@ dependencies {
     implementation libs.jackson.databind
     implementation libs.jackson.annotations
     implementation libs.jackson.jsr310
+    implementation "org.xerial:sqlite-jdbc:3.45.1.0"
 }
 
 // Apply a specific Java toolchain to ease working on different environments.

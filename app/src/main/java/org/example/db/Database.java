@@ -11,6 +11,18 @@ final class Database {
     }
 
     private static void init() {
+        // 1. Get the parent directory from the URL (or hardcode it if it matches DB_URL)
+        java.io.File dbFile = new java.io.File("data/repos.db");
+        java.io.File directory = dbFile.getParentFile();
+
+        // 2. Create the directory if it doesn't exist
+        if (directory != null && !directory.exists()) {
+            boolean created = directory.mkdirs();
+            if (created) {
+                System.out.println("Created database directory: " + directory.getPath());
+            }
+        }
+
         try (Connection conn = getConnection();
              Statement stmt = conn.createStatement()) {
 
