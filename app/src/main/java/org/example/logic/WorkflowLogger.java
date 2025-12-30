@@ -255,9 +255,6 @@ public class WorkflowLogger {
         System.out.println(details);
     }
 
-    private static final DateTimeFormatter LOG_TIME_FORMAT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-
     private void printCompletedWorkflow(WorkflowRun run, List<WorkflowJob> jobs) {
         printWorkflowRun(run);
 
@@ -283,7 +280,7 @@ public class WorkflowLogger {
         // 3. Print Job line (indented for hierarchy)
         System.out.println(String.format(
                 "  %s [Job %s] %s",
-                timestamp.format(LOG_TIME_FORMAT),
+                timestamp.format(logTimeFormat),
                 statusDisplay.toUpperCase(),
                 job.getName()
         ));
@@ -313,7 +310,7 @@ public class WorkflowLogger {
         // 4. Print Step line (further indented)
         System.out.println(String.format(
                 "    %s [Step %s] %s",
-                timestamp.format(LOG_TIME_FORMAT),
+                timestamp.format(logTimeFormat),
                 statusDisplay.toUpperCase(),
                 step.getName()
         ));
