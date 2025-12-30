@@ -22,6 +22,8 @@ public class WorkflowLogger {
 
     private OffsetDateTime oldestNotCompletedJobTimestamp;
     private OffsetDateTime lastPollTimestamp;
+    private final DateTimeFormatter logTimeFormat =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public WorkflowLogger(ApiDataRetriever api) {
         this.api = api;
@@ -225,78 +227,78 @@ public class WorkflowLogger {
     }
 
     private void printWorkflowRun(WorkflowRun workflowRun) {
-        StringBuilder queuedStr = new StringBuilder();
-        Workflow assosiatedWorkflow = existingWorkflows.get(workflowRun.getWorkflowId());
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-        queuedStr.append("[Workflow] ").append(assosiatedWorkflow.getName()).append("\n");
-        queuedStr.append(
-                (workflowRun.getUpdatedAt() == null ? workflowRun.getCreatedAt() : workflowRun.getUpdatedAt())
-                        .format(formatter)
-                )
-                .append(" [RUN ");
-        if (workflowRun.getStatus() == Status.COMPLETED) {
-            queuedStr.append(workflowRun.getConclusion());
-        } else {
-            queuedStr.append(workflowRun.getStatus());
-        }
-        queuedStr.append("] ")
-        .append(workflowRun.getName())
-        .append(" ")
-        .append("Branch: ")
-        .append(workflowRun.getHeadBranch())
-        .append(" ")
-        .append("Commit: ")
-        .append(workflowRun.getHeadSha());
-        System.out.println(queuedStr);
+        Workflow associatedWorkflow = existingWorkflows.get(workflowRun.getWorkflowId());
+
+        // 1. Determine the relevant timestamp
+        OffsetDateTime timestamp = (workflowRun.getUpdatedAt() != null)
+                ? workflowRun.getUpdatedAt()
+                : workflowRun.getCreatedAt();
+
+        // 2. Determine the status/conclusion display string
+        String statusDisplay = (workflowRun.getStatus() == Status.COMPLETED)
+                ? workflowRun.getConclusion().toString()
+                : workflowRun.getStatus().toString();
+
+        // 3. Use String.format for a clean, scannable template
+        String header = String.format("[Workflow] %s", associatedWorkflow.getName());
+
+        String details = String.format(
+                "%s [RUN %s] %s | Branch: %s | Commit: %s",
+                timestamp.format(logTimeFormat),
+                statusDisplay.toUpperCase(),
+                workflowRun.getName(),
+                workflowRun.getHeadBranch(),
+                workflowRun.getHeadSha()
+        );
+
+        System.out.println(header);
+        System.out.println(details);
     }
+
+    private static final DateTimeFormatter LOG_TIME_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private void printCompletedWorkflow(WorkflowRun run, List<WorkflowJob> jobs) {
         printWorkflowRun(run);
 
-        switch (run.getConclusion()) {
-            case Conclusion.FAILURE:
-            case Conclusion.TIMED_OUT:
-                jobs.stream()
-                        .filter(j -> j.getConclusion() == Conclusion.FAILURE
-                        || j.getConclusion() == Conclusion.TIMED_OUT
-                        || j.getConclusion() == Conclusion.STARTUP_FAILURE)
-                        .forEach(job -> printWorkflowJob(job, true, false));
-                break;
-            case ACTION_REQUIRED:
-                System.out.println("Run link: " + run.getHtmlUrl());
-                break;
-            default:
-                break;
+        Conclusion conclusion = run.getConclusion();
+        if (Conclusion.FAILURE.equals(conclusion) || Conclusion.TIMED_OUT.equals(conclusion)) {
+            jobs.stream()
+                    .filter(j -> List.of(Conclusion.FAILURE, Conclusion.TIMED_OUT, Conclusion.STARTUP_FAILURE)
+                            .contains(j.getConclusion()))
+                    .forEach(job -> printWorkflowJob(job, true, false));
+        } else if (Conclusion.ACTION_REQUIRED.equals(conclusion)) {
+            System.out.println("   -> Action Required: " + run.getHtmlUrl());
         }
     }
 
     private void printWorkflowJob(WorkflowJob job, boolean printSteps, boolean printSuccessfulSteps) {
-        StringBuilder queuedStr = new StringBuilder();
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-        queuedStr.append((job.getCompletedAt() == null ?
-                        (job.getStartedAt() == null ? job.getCreatedAt() : job.getStartedAt())
-                        : job.getCompletedAt()).format(formatter))
-                .append(" [Job ");
-        if (job.getStatus() == Status.COMPLETED) {
-            queuedStr.append(job.getConclusion());
-        } else {
-            queuedStr.append(job.getStatus());
-        }
-        queuedStr.append("] ")
-        .append(job.getName());
+        // 1. Determine timestamp: priority is Completed -> Started -> Created
+        OffsetDateTime timestamp = job.getCompletedAt();
+        if (timestamp == null) timestamp = (job.getStartedAt() != null) ? job.getStartedAt() : job.getCreatedAt();
 
-        System.out.println(queuedStr);
+        // 2. Determine display status
+        String statusDisplay = ((job.getStatus() == Status.COMPLETED) ? job.getConclusion() : job.getStatus()).toString();
+
+        // 3. Print Job line (indented for hierarchy)
+        System.out.println(String.format(
+                "  %s [Job %s] %s",
+                timestamp.format(LOG_TIME_FORMAT),
+                statusDisplay.toUpperCase(),
+                job.getName()
+        ));
+
         if (printSteps) {
             List<JobStep> steps = job.getSortedSteps();
 
+            // Filter out successful steps if requested
             if (!printSuccessfulSteps) {
-                steps = steps.stream().filter(s -> s.getConclusion() != null
-                        && s.getConclusion() != Conclusion.SUCCESS).toList();
+                steps = steps.stream()
+                        .filter(s -> s.getConclusion() != null && !Conclusion.SUCCESS.equals(s.getConclusion()))
+                        .toList();
             }
 
-            for (JobStep step : steps) {
-                printWorkflowJobStep(step);
-            }
+            steps.forEach(this::printWorkflowJobStep);
         }
     }
 
@@ -304,21 +306,18 @@ public class WorkflowLogger {
         if (step.getStatus() != Status.COMPLETED && step.getStatus() != Status.IN_PROGRESS) {
             return;
         }
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-        StringBuilder queuedStr = new StringBuilder();
-        queuedStr.append((step.getCompletedAt() == null ? step.getStartedAt() : step.getCompletedAt()).format(formatter))
-                .append(" [Step ");
-        if (step.getStatus() == Status.COMPLETED) {
-            queuedStr.append(step.getConclusion());
-        } else {
-            queuedStr.append(step.getStatus());
-        }
-        queuedStr.append("] ")
-        .append(step.getName());
-        System.out.println(queuedStr);
+        OffsetDateTime timestamp = (step.getCompletedAt() == null) ? step.getStartedAt() : step.getCompletedAt();
+        String statusDisplay = ((step.getStatus() == Status.COMPLETED) ? step.getConclusion() : step.getStatus()).toString();
+
+        // 4. Print Step line (further indented)
+        System.out.println(String.format(
+                "    %s [Step %s] %s",
+                timestamp.format(LOG_TIME_FORMAT),
+                statusDisplay.toUpperCase(),
+                step.getName()
+        ));
     }
-
     private void initWorkflows() {
         try {
             List<Workflow> workflows = api.getWorkflows();
