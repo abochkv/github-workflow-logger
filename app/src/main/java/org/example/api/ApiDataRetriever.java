@@ -46,34 +46,9 @@ public class ApiDataRetriever {
         this(repo, owner, token, 100, "https://api.github.com");
     }
 
-    public WorkflowRun getWorkflowRunById(long id) throws Exception {
-        String url = String.format("%s/repos/%s/%s/actions/runs/%d", apiBaseUrl, owner, repo, id);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", "Bearer " + token)
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2022-11-28")
-                .GET()
-                .build();
-
-        String jsonBody = executeRequest(request).body();
-        return objectMapper.readValue(jsonBody, WorkflowRun.class);
-    }
-
     public List<Workflow> getWorkflows() throws Exception {
         String url = String.format("%s/repos/%s/%s/actions/workflows", apiBaseUrl, owner, repo);
         return executePaginatedRequest(url, Map.of(), WorkflowsDataContract.class);
-    }
-
-    public List<WorkflowRun> getQueuedWorkflowRuns() throws Exception {
-        String url = String.format("%s/repos/%s/%s/actions/runs", apiBaseUrl, owner, repo);
-        return executePaginatedRequest(url, Map.of("status", "queued"), WorkflowRunsDataContract.class);
-    }
-
-    public List<WorkflowRun> getActiveWorkflowRuns() throws Exception {
-        String url = String.format("%s/repos/%s/%s/actions/runs", apiBaseUrl, owner, repo);
-        return executePaginatedRequest(url, Map.of("status", "in_progress"), WorkflowRunsDataContract.class);
     }
 
     public List<WorkflowRun> getWorkflowRunsFrom(String fromDate) throws Exception {
