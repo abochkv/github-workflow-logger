@@ -1,80 +1,80 @@
 package org.example.api;
 
-import com.github.tomakehurst.wiremock.junit5.WireMockRuntimeInfo;
-import com.github.tomakehurst.wiremock.junit5.WireMockTest;
-import org.example.model.Conclusion;
-import org.example.model.WorkflowRun;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.example.model.Workflow;
+import org.junit.jupiter.api.*;
+import org.mockito.*;
 
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.List;
 
-import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-@WireMockTest
 class ApiDataRetrieverTest {
 
     private ApiDataRetriever api;
 
     @BeforeEach
-    void setUp(WireMockRuntimeInfo wmRuntimeInfo) {
-        // Point the API to the local WireMock server
-        String baseUrl = wmRuntimeInfo.getHttpBaseUrl();
-        api = new ApiDataRetriever("test-repo", "test-owner", "fake-token", 1, baseUrl);
+    void setUp() {
+        api = spy(new ApiDataRetriever(
+                "repo",
+                "owner",
+                "token",
+                2,
+                "http://localhost"
+        ));
     }
 
     @Test
-    void testGetWorkflowRunById_ParsesCorrectly() throws Exception {
-        // 1. Stub the API response
-        stubFor(get(urlPathEqualTo("/repos/test-owner/test-repo/actions/runs/123"))
-                .willReturn(aResponse()
-                        .withHeader("Content-Type", "application/json")
-                        .withBody("""
-                            {
-                                "id": 123,
-                                "name": "CI Build",
-                                "status": "completed",
-                                "conclusion": "success"
-                            }
-                        """)));
+    void getWorkflows_handlesPagination() throws Exception {
+        HttpResponse<String> page1 = mockResponse("""
+            { "total_count": 3, "workflows": [
+                { "id": 1, "name": "A" },
+                { "id": 2, "name": "B" }
+            ]}
+        """);
 
-        // 2. Execute
-        WorkflowRun run = api.getWorkflowRunById(123);
+        HttpResponse<String> page2 = mockResponse("""
+            { "total_count": 3, "workflows": [
+                { "id": 3, "name": "C" }
+            ]}
+        """);
 
-        // 3. Verify
-        assertNotNull(run);
-        assertEquals(123, run.getId());
-        assertEquals("CI Build", run.getName());
-        assertEquals(Conclusion.SUCCESS, run.getConclusion());
+        doReturn(page1)
+                .doReturn(page2)
+                .when(api).executeRequest(any(HttpRequest.class));
+
+        List<Workflow> workflows = api.getWorkflows();
+
+        assertEquals(3, workflows.size());
     }
 
     @Test
-    void testPagination_FetchesAllPages() throws Exception {
-        // Page 1: Returns 1 item, Total count 2
-        stubFor(get(urlPathMatching(".*actions/runs"))
-                .withQueryParam("page", equalTo("1"))
-                .willReturn(okJson("""
-                    {
-                        "total_count": 2,
-                        "workflow_runs": [ { "id": 1, "name": "Run 1" } ]
-                    }
-                """)));
+    void getWorkflows_throwsOnHttpError() throws Exception {
+        ApiDataRetriever api = spy(new ApiDataRetriever(
+                "repo", "owner", "token", 100, "http://localhost"
+        ));
 
-        // Page 2: Returns 1 item
-        stubFor(get(urlPathMatching(".*actions/runs"))
-                .withQueryParam("page", equalTo("2"))
-                .willReturn(okJson("""
-                    {
-                        "total_count": 2,
-                        "workflow_runs": [ { "id": 2, "name": "Run 2" } ]
-                    }
-                """)));
+        doThrow(new RuntimeException("GitHub API error: 403"))
+                .when(api).executeRequest(any());
 
-        List<WorkflowRun> runs = api.getQueuedWorkflowRuns();
+        RuntimeException ex = assertThrows(
+                RuntimeException.class,
+                api::getWorkflows
+        );
 
-        assertEquals(2, runs.size(), "Should have fetched 2 runs across 2 pages");
-        assertEquals(1, runs.get(0).getId());
-        assertEquals(2, runs.get(1).getId());
+        assertTrue(ex.getMessage().contains("GitHub API error"));
+    }
+
+
+    private HttpResponse<String> mockResponse(String body) {
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn(body);
+        return response;
     }
 }
+
+
+

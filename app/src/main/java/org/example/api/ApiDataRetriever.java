@@ -110,7 +110,7 @@ public class ApiDataRetriever {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
-    private HttpResponse<String> executeRequest(HttpRequest request) throws Exception {
+    HttpResponse<String> executeRequest(HttpRequest request) throws Exception {
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {

@@ -3,44 +3,40 @@ package org.example.logic;
 import org.example.api.ApiDataRetriever;
 import org.example.db.Repository;
 import org.example.model.*;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-import org.mockito.MockedStatic;
-import org.mockito.MockitoAnnotations;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.junit.jupiter.api.*;
+import org.mockito.*;
 
-import java.util.Collections;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.mockito.Mockito.*;
+import org.mockito.MockedStatic;
 
 class WorkflowLoggerTest {
 
-    private static final Logger log = LoggerFactory.getLogger(WorkflowLoggerTest.class);
     @Mock
-    private ApiDataRetriever apiMock;
+    ApiDataRetriever api;
 
-    private MockedStatic<Repository> repositoryMock;
-    private WorkflowLogger logger;
+    WorkflowLogger logger;
+
+    MockedStatic<Repository> repositoryMock;
 
     @BeforeEach
     void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
 
-        // Mock static Repository methods
         repositoryMock = mockStatic(Repository.class);
+        repositoryMock.when(() ->
+                Repository.updateTimestamp(any(), any(), any(), any())
+        ).thenAnswer(inv -> null);
 
-        // Mock initial workflow fetch (constructor logic)
-        Workflow wf = new Workflow();
-        wf.setId(1L);
-        wf.setName("Test Workflow");
-        when(apiMock.getWorkflows()).thenReturn(List.of(wf));
+        Workflow wf = mock(Workflow.class);
+        when(wf.getId()).thenReturn(1L);
+        when(wf.getName()).thenReturn("CI");
 
-        // Create logger with the mocked API
-        logger = new WorkflowLogger(apiMock);
+        when(api.getWorkflows()).thenReturn(List.of(wf));
+
+        logger = spy(new WorkflowLogger(api));
     }
 
     @AfterEach
@@ -48,62 +44,62 @@ class WorkflowLoggerTest {
         repositoryMock.close();
     }
 
-    @Test
-    void testHandleNewRepository_FetchesActiveAndQueued() throws Exception {
-        // Setup API responses
-        WorkflowRun activeRun = createRun(100, Status.IN_PROGRESS);
-        WorkflowJob job = createJob(500, Status.IN_PROGRESS);
-
-        when(apiMock.getQueuedWorkflowRuns()).thenReturn(Collections.emptyList());
-        when(apiMock.getActiveWorkflowRuns()).thenReturn(List.of(activeRun));
-        when(apiMock.getJobsForWorkflowRun(100)).thenReturn(List.of(job));
-
-        // Execute
-        logger.handleNewRepository();
-
-        // Verify API was called
-        verify(apiMock, times(1)).getActiveWorkflowRuns();
-        verify(apiMock, times(1)).getJobsForWorkflowRun(100);
-    }
 
     @Test
-    void testCheckForChanges_DetectsNewRun() throws Exception {
-        // 1. Setup: No active runs initially
-        when(apiMock.getQueuedWorkflowRuns()).thenReturn(Collections.emptyList());
-        when(apiMock.getActiveWorkflowRuns()).thenReturn(Collections.emptyList());
+    void handleNewRepository_fetchesWorkflowsAndUpdatesTimestamp() throws Exception {
+        WorkflowRun run = mockWorkflowRun(
+                10L,
+                Status.IN_PROGRESS,
+                OffsetDateTime.now().minusHours(1)
+        );
 
-        // Let's simulate the state transition:
-        // First call returns nothing
+        when(api.getWorkflowRunsFrom(anyString()))
+                .thenReturn(List.of(run));
+
         logger.handleNewRepository();
 
-        // Second call returns a NEW active run
-        WorkflowRun newRun = createRun(200, Status.IN_PROGRESS);
-        WorkflowJob newJob = createJob(501, Status.QUEUED);
-
-        when(apiMock.getActiveWorkflowRuns()).thenReturn(List.of(newRun));
-        when(apiMock.getJobsForWorkflowRun(200)).thenReturn(List.of(newJob));
-
-        logger.checkForChanges();
-
-        // Verify we fetched jobs for the new run
-        verify(apiMock).getJobsForWorkflowRun(200);
+        verify(api).getWorkflowRunsFrom(anyString());
+        repositoryMock.verify(() ->
+                Repository.updateTimestamp(any(), any(), any(), any())
+        );
     }
 
-    // Helper methods to create dummy data
-    private WorkflowRun createRun(long id, Status status) {
-        WorkflowRun r = new WorkflowRun();
-        r.setId(id);
-        r.setWorkflowId(1L);
-        r.setStatus(status);
-        r.setName("Test Run");
-        return r;
+
+    @Test
+    void handleExistingRepository_completedWorkflow_printsAndCaches() throws Exception {
+        WorkflowRun completedRun = mockWorkflowRun(
+                11L,
+                Status.COMPLETED,
+                OffsetDateTime.now().minusMinutes(10)
+        );
+        when(completedRun.getConclusion()).thenReturn(Conclusion.SUCCESS);
+
+        when(api.getWorkflowRunsFrom(anyString()))
+                .thenReturn(List.of(completedRun));
+        when(api.getJobsForWorkflowRun(11L))
+                .thenReturn(List.of());
+
+        logger.handleExistingRepository(
+                OffsetDateTime.now().minusDays(1).toString(),
+                OffsetDateTime.now().minusDays(2).toString()
+        );
+
+        verify(api).getJobsForWorkflowRun(11L);
     }
 
-    private WorkflowJob createJob(long id, Status status) {
-        WorkflowJob j = new WorkflowJob();
-        j.setId(id);
-        j.setStatus(status);
-        j.setName("Test Job");
-        return j;
+
+    private WorkflowRun mockWorkflowRun(long id, Status status, OffsetDateTime createdAt) {
+        WorkflowRun run = mock(WorkflowRun.class);
+        when(run.getId()).thenReturn(id);
+        when(run.getStatus()).thenReturn(status);
+        when(run.getCreatedAt()).thenReturn(createdAt);
+        when(run.getUpdatedAt()).thenReturn(createdAt.plusMinutes(1));
+        when(run.getWorkflowId()).thenReturn(1L);
+        when(run.getName()).thenReturn("Build");
+        when(run.getHeadBranch()).thenReturn("main");
+        when(run.getHeadSha()).thenReturn("abc123");
+        return run;
     }
 }
+
+
