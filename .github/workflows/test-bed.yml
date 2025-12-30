@@ -18,6 +18,16 @@ jobs:
       - name: "Step 3: Finalize"
         run: echo "Done!"
 
+  very-long-running-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Step 1: Setup"
+        run: sleep 15
+      - name: "Step 2: Work"
+        run: sleep 45
+      - name: "Step 3: Finalize"
+        run: echo "Done!"
+
   conditional-failure:
     runs-on: ubuntu-latest
     steps:
