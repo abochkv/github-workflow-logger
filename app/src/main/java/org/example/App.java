@@ -1,6 +1,7 @@
 package org.example;
 
 import org.example.api.ApiDataRetriever;
+import org.example.db.RepoMetadata;
 import org.example.db.Repository;
 import org.example.logic.WorkflowLogger;
 
@@ -40,12 +41,14 @@ public class App {
             logger.registerShutdownHook();
 
             if (Repository.exists(repo, owner)) {
-                logger.handleExistingRepository(Repository.getConnectedAt(repo, owner));
+                RepoMetadata metadata = Repository.getConnectedAt(repo, owner);
+                logger.handleExistingRepository(metadata.connectedAt(), metadata.lastNotCompletedWorkflowRunTimestamp());
             } else {
                 Repository.add(repo, owner);
                 logger.handleNewRepository();
             }
             logger.startPolling();
+            System.out.println("Exiting...");
         } catch (Exception e) {
             e.printStackTrace();
         }

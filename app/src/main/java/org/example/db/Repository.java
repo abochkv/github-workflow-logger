@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 
 public class Repository {
 
@@ -24,8 +25,8 @@ public class Repository {
 
     public static void add(String repo, String owner) {
         String sql = """
-            INSERT OR IGNORE INTO connected_repos (repo, connected_at)
-            VALUES (?, ?)
+            INSERT OR IGNORE INTO connected_repos (repo, connected_at, last_not_completed_workflow_run_timestamp)
+            VALUES (?, ?, ?)
         """;
 
         try (Connection conn = Database.getConnection();
@@ -33,6 +34,7 @@ public class Repository {
 
             ps.setString(1, repo + "/" + owner);
             ps.setString(2, Instant.now().toString());
+            ps.setString(3, Instant.now().toString());
             ps.executeUpdate();
 
         } catch (Exception e) {
@@ -40,8 +42,8 @@ public class Repository {
         }
     }
 
-    public static String getConnectedAt(String repo, String owner) {
-        String sql = "SELECT connected_at FROM connected_repos WHERE repo = ?";
+    public static RepoMetadata getConnectedAt(String repo, String owner) {
+        String sql = "SELECT connected_at, last_not_completed_workflow_run_timestamp FROM connected_repos WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -49,7 +51,10 @@ public class Repository {
             ps.setString(1, repo + "/" + owner);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return rs.getString("connected_at");
+                    return new RepoMetadata(
+                            rs.getString("connected_at"),
+                            rs.getString("last_not_completed_workflow_run_timestamp")
+                    );
                 }
             }
             throw new RuntimeException("Repo not found: " + repo);
@@ -59,14 +64,15 @@ public class Repository {
         }
     }
 
-    public static void updateTimestamp(String repo, String owner) {
-        String sql = "UPDATE connected_repos SET connected_at = ? WHERE repo = ?";
+    public static void updateTimestamp(String repo, String owner, OffsetDateTime lastPolled, OffsetDateTime timestamp) {
+        String sql = "UPDATE connected_repos SET connected_at = ?, last_not_completed_workflow_run_timestamp = ? WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, Instant.now().toString());
-            ps.setString(2, repo + "/" + owner);
+            ps.setString(1, lastPolled.toString());
+            ps.setString(2, timestamp.toString());
+            ps.setString(3, repo + "/" + owner);
 
             ps.executeUpdate();
 

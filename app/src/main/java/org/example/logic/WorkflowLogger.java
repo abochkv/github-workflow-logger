@@ -4,6 +4,9 @@ import org.example.api.ApiDataRetriever;
 import org.example.db.Repository;
 import org.example.model.*;
 
+import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -13,8 +16,12 @@ public class WorkflowLogger {
     private static final long POLL_INTERVAL_MS = 30_000;
     private final ApiDataRetriever api;
     private final Map<Long, Workflow> existingWorkflows = new HashMap<>();
-    private final Set<WorkflowRun> queuedWorkflowRuns = new HashSet<>();
-    private final Map<WorkflowRun, Map<Long, WorkflowJob>> workflowRunToJobMap = new HashMap<>();
+    private final Set<Long> queuedWorkflowRuns = new HashSet<>();
+    private final Set<Long> completedWorkflowRunIds = new HashSet<>();
+    private final Map<WorkflowRun, Map<Long, WorkflowJob>> activeWorkflowRuns = new HashMap<>();
+
+    private OffsetDateTime oldestNotCompletedJobTimestamp;
+    private OffsetDateTime lastPollTimestamp;
 
     public WorkflowLogger(ApiDataRetriever api) {
         this.api = api;
@@ -22,28 +29,27 @@ public class WorkflowLogger {
     }
 
     public void registerShutdownHook() {
+        Thread mainThread = Thread.currentThread();
+
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("\nStopping gracefully... please wait.");
             this.running = false;
+            mainThread.interrupt();
         }));
     }
 
     public void handleNewRepository() throws Exception {
-        queuedWorkflowRuns.addAll(api.getQueuedWorkflowRuns());
-        List<WorkflowRun> active = api.getActiveWorkflowRuns();
-
-        for (WorkflowRun activeRun : active) {
-            List<WorkflowJob> jobs = api.getJobsForWorkflowRun(activeRun.getId());
-            workflowRunToJobMap.put(activeRun, new HashMap<>());
-
-            for (WorkflowJob job : jobs) {
-                workflowRunToJobMap.get(activeRun).put(job.getId(), job);
-            }
-        }
+        List<WorkflowRun> workflowRuns = api.getWorkflowRunsFrom(OffsetDateTime.now().minus(Duration.ofDays(3)).toString());
+        updateLocalCache(workflowRuns);
+        this.oldestNotCompletedJobTimestamp = getOldestActiveRunTimestamp(workflowRuns);
+        updateTimestamp();
     }
 
-    public void handleExistingRepository(String lastRetrieved) throws Exception {
+    public void handleExistingRepository(String lastRetrieved, String lastNotCompletedWorkflowRunTimestamp) throws Exception {
         List<WorkflowRun> workflowsSinceLast = api.getWorkflowRunsFrom(lastRetrieved);
+
+        this.oldestNotCompletedJobTimestamp = getOldestActiveRunTimestamp(workflowsSinceLast);
+
+        workflowsSinceLast = filterWorkflowsUpdatedAfter(workflowsSinceLast, lastNotCompletedWorkflowRunTimestamp);
 
         for (WorkflowRun workflowRun : workflowsSinceLast) {
             List<WorkflowJob> jobs;
@@ -51,31 +57,47 @@ public class WorkflowLogger {
                 case Status.COMPLETED:
                     jobs = api.getJobsForWorkflowRun(workflowRun.getId());
                     printCompletedWorkflow(workflowRun, jobs);
+                    this.completedWorkflowRunIds.add(workflowRun.getId());
                     break;
                 case Status.IN_PROGRESS:
                     printWorkflowRun(workflowRun);
                     jobs = api.getJobsForWorkflowRun(workflowRun.getId());
-                    workflowRunToJobMap.put(workflowRun, new HashMap<>());
+                    activeWorkflowRuns.put(workflowRun, new HashMap<>());
 
                     for (WorkflowJob job : jobs) {
-                        workflowRunToJobMap.get(workflowRun).put(job.getId(), job);
-
-                        if (job.getStatus() == Status.IN_PROGRESS || job.getStatus() == Status.COMPLETED) {
-                            printWorkflowJob(job);
-                            for (JobStep step : job.getSortedSteps()) {
-                                printWorkflowJobStep(step);
-                            }
-                        }
+                        activeWorkflowRuns.get(workflowRun).put(job.getId(), job);
+                        printWorkflowJob(job, true, true);
                     }
                     break;
-                default:
+                case Status.QUEUED:
+                    this.queuedWorkflowRuns.add(workflowRun.getId());
                     printWorkflowRun(workflowRun);
+                    break;
+                default:
                     break;
             }
         }
-        Repository.updateTimestamp(api.repo, api.owner);
+        updateTimestamp();
+    }
 
+    private void updateTimestamp() {
+        this.lastPollTimestamp = OffsetDateTime.now();
+        Repository.updateTimestamp(api.repo, api.owner, this.lastPollTimestamp, this.oldestNotCompletedJobTimestamp);
+    }
 
+    private List<WorkflowRun> filterWorkflowsUpdatedAfter(List<WorkflowRun> workflowsSinceLast, String shutdownInstant) {
+        return workflowsSinceLast.stream().filter(r -> r.getUpdatedAt() != null && r.getUpdatedAt()
+                .isAfter(OffsetDateTime.parse(shutdownInstant)))
+                .sorted(Comparator.comparing(WorkflowRun::getUpdatedAt)).toList();
+    }
+
+    private OffsetDateTime getOldestActiveRunTimestamp(List<WorkflowRun> workflowRuns) {
+        OffsetDateTime time = workflowRuns.stream()
+                .filter(r -> r.getStatus() != Status.COMPLETED)
+                .map(WorkflowRun::getCreatedAt)
+                .min(Comparator.naturalOrder())
+                .orElse(this.oldestNotCompletedJobTimestamp);
+        return time == null ? OffsetDateTime.now() : time;
     }
 
     public void startPolling() throws Exception {
@@ -87,90 +109,96 @@ public class WorkflowLogger {
         while (running) {
             try {
                 checkForChanges();
-                Repository.updateTimestamp(api.repo, api.owner);
+                updateTimestamp();
             } catch (Exception e) {
                 System.err.println("Error during poll: " + e.getMessage());
                 e.printStackTrace();
             }
 
             // Sleep to preserve rate limit
-            Thread.sleep(POLL_INTERVAL_MS);
+            try {
+                Thread.sleep(POLL_INTERVAL_MS);
+            } catch (InterruptedException e) {
+                if (!running) {
+                    break;
+                }
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
     protected void checkForChanges() throws Exception {
-        // 1. Check Queued Runs
-        List<WorkflowRun> currentQueued = api.getQueuedWorkflowRuns();
-        for (WorkflowRun run : currentQueued) {
-            if (!this.queuedWorkflowRuns.contains(run)) {
-                printWorkflowRun(run);
-            }
-        }
-        this.queuedWorkflowRuns.clear();
-        this.queuedWorkflowRuns.addAll(currentQueued);
+        List<WorkflowRun> workflowRuns = api.getWorkflowRunsFrom(this.oldestNotCompletedJobTimestamp.toString());
+        this.oldestNotCompletedJobTimestamp = getOldestActiveRunTimestamp(workflowRuns);
 
-        // 2. Check Active Runs
-        List<WorkflowRun> activeWorkflows = api.getActiveWorkflowRuns();
+        List<WorkflowRun> filteredWorkflowRuns = filterWorkflowsUpdatedAfter(workflowRuns, this.lastPollTimestamp.toString());
 
-        for (WorkflowRun activeRun : activeWorkflows) {
-            if (workflowRunToJobMap.containsKey(activeRun)) {
-                checkForJobUpdatesForWorkflowRun(activeRun);
-            } else {
-                // New Run Detected
-                printWorkflowRun(activeRun);
-                workflowRunToJobMap.put(activeRun, new HashMap<>());
+        for (WorkflowRun run : filteredWorkflowRuns) {
+            switch (run.getStatus()) {
+                case Status.COMPLETED:
+                    if (!completedWorkflowRunIds.contains(run.getId())) {
+                        printCompletedWorkflow(run, api.getJobsForWorkflowRun(run.getId()));
+                    }
+                    break;
+                case Status.IN_PROGRESS:
+                    if (activeWorkflowRuns.containsKey(run)) {
+                    checkForJobUpdatesForWorkflowRun(run);
+                } else {
+                    // New Run Detected
+                    printWorkflowRun(run);
+                    activeWorkflowRuns.put(run, new HashMap<>());
 
-                // Initialize jobs for the new run
-                List<WorkflowJob> initialJobs = api.getJobsForWorkflowRun(activeRun.getId());
-                for (WorkflowJob job : initialJobs) {
-                    workflowRunToJobMap.get(activeRun).put(job.getId(), job);
-                    printWorkflowJob(job);
-
-                    if (job.getStatus() == Status.IN_PROGRESS) {
-                        for (JobStep step : job.getSortedSteps()) {
-                            printWorkflowJobStep(step);
-                        }
+                    // Initialize jobs for the new run
+                    List<WorkflowJob> initialJobs = api.getJobsForWorkflowRun(run.getId());
+                    for (WorkflowJob job : initialJobs) {
+                        activeWorkflowRuns.get(run).put(job.getId(), job);
+                        printWorkflowJob(job, true, true);
                     }
                 }
+                    break;
+                case Status.QUEUED:
+                    if (!queuedWorkflowRuns.contains(run.getId())) {
+                        printWorkflowRun(run);
+                    }
+                default:
+                    break;
             }
         }
 
-        // 3. Check Completed Runs
-        Set<WorkflowRun> activeSet = new HashSet<>(activeWorkflows);
-        Set<WorkflowRun> trackedRuns = new HashSet<>(workflowRunToJobMap.keySet());
+        updateLocalCache(workflowRuns);
+    }
 
-        // trackedRuns - activeSet = Completed Runs
-        trackedRuns.removeAll(activeSet);
+    private void updateLocalCache(List<WorkflowRun> runs) {
+        this.activeWorkflowRuns.keySet().retainAll(runs.stream()
+                .filter(r -> r.getStatus() == Status.IN_PROGRESS)
+                .collect(Collectors.toSet()));
 
-        for (WorkflowRun completedRun : trackedRuns) {
-            WorkflowRun finalStateRun = api.getWorkflowRunById(completedRun.getId());
+        this.completedWorkflowRunIds.clear();
+        this.completedWorkflowRunIds.addAll(runs.stream()
+                .filter(r -> r.getStatus() == Status.COMPLETED)
+                .map(WorkflowRun::getId).collect(Collectors.toSet()));
 
-            if (finalStateRun != null) {
-                printCompletedWorkflow(finalStateRun, new ArrayList<>(workflowRunToJobMap.get(completedRun).values()));
-            }
-            workflowRunToJobMap.remove(completedRun);
-        }
+        this.queuedWorkflowRuns.clear();
+        this.queuedWorkflowRuns.addAll(runs.stream()
+                .filter(r -> r.getStatus() == Status.QUEUED)
+                .map(WorkflowRun::getId).collect(Collectors.toSet()));
     }
 
     private void checkForJobUpdatesForWorkflowRun(WorkflowRun workflowRun) throws Exception {
         List<WorkflowJob> currentJobs = api.getJobsForWorkflowRun(workflowRun.getId());
-        Map<Long, WorkflowJob> cachedJobs = this.workflowRunToJobMap.get(workflowRun);
+        Map<Long, WorkflowJob> cachedJobs = this.activeWorkflowRuns.get(workflowRun);
 
         for (WorkflowJob currentJob : currentJobs) {
             WorkflowJob lastKnownJob = cachedJobs.get(currentJob.getId());
 
             if (lastKnownJob == null) {
-                printWorkflowJob(currentJob);
+                printWorkflowJob(currentJob, false, false);
                 cachedJobs.put(currentJob.getId(), currentJob);
-                // Print steps if they exist already
-                if (currentJob.getStatus() == Status.IN_PROGRESS) {
-                    currentJob.getSortedSteps().forEach(this::printWorkflowJobStep);
-                }
                 continue;
             }
 
             if (currentJob.getStatus() != lastKnownJob.getStatus()) {
-                printWorkflowJob(currentJob);
+                printWorkflowJob(currentJob, false, false);
                 cachedJobs.put(currentJob.getId(), currentJob);
             }
 
@@ -199,8 +227,12 @@ public class WorkflowLogger {
     private void printWorkflowRun(WorkflowRun workflowRun) {
         StringBuilder queuedStr = new StringBuilder();
         Workflow assosiatedWorkflow = existingWorkflows.get(workflowRun.getWorkflowId());
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
         queuedStr.append("[Workflow] ").append(assosiatedWorkflow.getName()).append("\n");
-        queuedStr.append(workflowRun.getUpdatedAt() == null ? workflowRun.getCreatedAt() : workflowRun.getUpdatedAt())
+        queuedStr.append(
+                (workflowRun.getUpdatedAt() == null ? workflowRun.getCreatedAt() : workflowRun.getUpdatedAt())
+                        .format(formatter)
+                )
                 .append(" [RUN ");
         if (workflowRun.getStatus() == Status.COMPLETED) {
             queuedStr.append(workflowRun.getConclusion());
@@ -220,6 +252,7 @@ public class WorkflowLogger {
 
     private void printCompletedWorkflow(WorkflowRun run, List<WorkflowJob> jobs) {
         printWorkflowRun(run);
+
         switch (run.getConclusion()) {
             case Conclusion.FAILURE:
             case Conclusion.TIMED_OUT:
@@ -227,7 +260,7 @@ public class WorkflowLogger {
                         .filter(j -> j.getConclusion() == Conclusion.FAILURE
                         || j.getConclusion() == Conclusion.TIMED_OUT
                         || j.getConclusion() == Conclusion.STARTUP_FAILURE)
-                        .forEach(this::printWorkflowJob);
+                        .forEach(job -> printWorkflowJob(job, true, false));
                 break;
             case ACTION_REQUIRED:
                 System.out.println("Run link: " + run.getHtmlUrl());
@@ -237,12 +270,12 @@ public class WorkflowLogger {
         }
     }
 
-    private void printWorkflowJob(WorkflowJob job) {
+    private void printWorkflowJob(WorkflowJob job, boolean printSteps, boolean printSuccessfulSteps) {
         StringBuilder queuedStr = new StringBuilder();
-
-        queuedStr.append(job.getCompletedAt() == null ?
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        queuedStr.append((job.getCompletedAt() == null ?
                         (job.getStartedAt() == null ? job.getCreatedAt() : job.getStartedAt())
-                        : job.getCompletedAt())
+                        : job.getCompletedAt()).format(formatter))
                 .append(" [Job ");
         if (job.getStatus() == Status.COMPLETED) {
             queuedStr.append(job.getConclusion());
@@ -253,15 +286,28 @@ public class WorkflowLogger {
         .append(job.getName());
 
         System.out.println(queuedStr);
+        if (printSteps) {
+            List<JobStep> steps = job.getSortedSteps();
+
+            if (!printSuccessfulSteps) {
+                steps = steps.stream().filter(s -> s.getConclusion() != null
+                        && s.getConclusion() != Conclusion.SUCCESS).toList();
+            }
+
+            for (JobStep step : steps) {
+                printWorkflowJobStep(step);
+            }
+        }
     }
 
     private void printWorkflowJobStep(JobStep step) {
         if (step.getStatus() != Status.COMPLETED && step.getStatus() != Status.IN_PROGRESS) {
             return;
         }
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
         StringBuilder queuedStr = new StringBuilder();
-        queuedStr.append(step.getCompletedAt() == null ? step.getStartedAt() : step.getCompletedAt())
+        queuedStr.append((step.getCompletedAt() == null ? step.getStartedAt() : step.getCompletedAt()).format(formatter))
                 .append(" [Step ");
         if (step.getStatus() == Status.COMPLETED) {
             queuedStr.append(step.getConclusion());

@@ -6,7 +6,7 @@ import java.time.OffsetDateTime;
 public class JobStep {
     private String name;
     private Status status;
-    private String conclusion;
+    private Conclusion conclusion;
     private int number;
 
     @JsonProperty("started_at")
@@ -22,8 +22,8 @@ public class JobStep {
     public Status getStatus() { return status; }
     public void setStatus(Status status) { this.status = status; }
 
-    public String getConclusion() { return conclusion; }
-    public void setConclusion(String conclusion) { this.conclusion = conclusion; }
+    public Conclusion getConclusion() { return conclusion; }
+    public void setConclusion(Conclusion conclusion) { this.conclusion = conclusion; }
 
     public int getNumber() { return number; }
     public void setNumber(int number) { this.number = number; }

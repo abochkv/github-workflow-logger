@@ -17,10 +17,7 @@ final class Database {
 
         // 2. Create the directory if it doesn't exist
         if (directory != null && !directory.exists()) {
-            boolean created = directory.mkdirs();
-            if (created) {
-                System.out.println("Created database directory: " + directory.getPath());
-            }
+            directory.mkdirs();
         }
 
         try (Connection conn = getConnection();
@@ -29,7 +26,8 @@ final class Database {
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS connected_repos (
                     repo TEXT PRIMARY KEY,
-                    connected_at TEXT NOT NULL
+                    connected_at TEXT NOT NULL,
+                    last_not_completed_workflow_run_timestamp TEXT NOT NULL
                 )
             """);
 

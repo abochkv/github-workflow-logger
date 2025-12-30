@@ -136,7 +136,6 @@ public class ApiDataRetriever {
     }
 
     private HttpResponse<String> executeRequest(HttpRequest request) throws Exception {
-        System.out.println(request.uri() + " ... ");
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
