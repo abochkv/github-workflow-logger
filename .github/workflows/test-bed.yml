@@ -24,7 +24,17 @@ jobs:
       - name: "Step 1: Setup"
         run: sleep 15
       - name: "Step 2: Work"
-        run: sleep 60
+        run: sleep 45
+      - name: "Step 3: Finalize"
+        run: echo "Done!"
+
+  very-very-long-running-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Step 1: Setup"
+        run: sleep 15
+      - name: "Step 2: Work"
+        run: sleep 100
       - name: "Step 3: Finalize"
         run: echo "Done!"
 
