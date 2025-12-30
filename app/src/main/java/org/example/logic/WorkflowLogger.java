@@ -11,22 +11,21 @@ import java.util.stream.Collectors;
 public class WorkflowLogger {
     private volatile boolean running = true;
     private static final long POLL_INTERVAL_MS = 30_000;
-    private final String owner;
-    private final String repo;
     private final ApiDataRetriever api;
     private final Map<Long, Workflow> existingWorkflows = new HashMap<>();
     private final Set<WorkflowRun> queuedWorkflowRuns = new HashSet<>();
     private final Map<WorkflowRun, Map<Long, WorkflowJob>> workflowRunToJobMap = new HashMap<>();
 
-    public WorkflowLogger(String repo, String owner, String token) {
-        this.owner = owner;
-        this.repo = repo;
-        this.api = new ApiDataRetriever(repo, owner, token);
+    public WorkflowLogger(ApiDataRetriever api) {
+        this.api = api;
+        initWorkflows();
+    }
+
+    public void registerShutdownHook() {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("\nStopping gracefully... please wait.");
             this.running = false;
         }));
-        initWorkflows();
     }
 
     public void handleNewRepository() throws Exception {
@@ -41,8 +40,6 @@ public class WorkflowLogger {
                 workflowRunToJobMap.get(activeRun).put(job.getId(), job);
             }
         }
-
-        pollingMode();
     }
 
     public void handleExistingRepository(String lastRetrieved) throws Exception {
@@ -76,8 +73,12 @@ public class WorkflowLogger {
                     break;
             }
         }
-        Repository.updateTimestamp(this.repo, this.owner);
+        Repository.updateTimestamp(api.repo, api.owner);
 
+
+    }
+
+    public void startPolling() throws Exception {
         pollingMode();
     }
 
@@ -86,11 +87,10 @@ public class WorkflowLogger {
         while (running) {
             try {
                 checkForChanges();
-                Repository.updateTimestamp(this.repo, this.owner);
+                Repository.updateTimestamp(api.repo, api.owner);
             } catch (Exception e) {
                 System.err.println("Error during poll: " + e.getMessage());
                 e.printStackTrace();
-                // Optional: Break on fatal errors or continue on transient ones
             }
 
             // Sleep to preserve rate limit
@@ -98,7 +98,7 @@ public class WorkflowLogger {
         }
     }
 
-    private void checkForChanges() throws Exception {
+    protected void checkForChanges() throws Exception {
         // 1. Check Queued Runs
         List<WorkflowRun> currentQueued = api.getQueuedWorkflowRuns();
         for (WorkflowRun run : currentQueued) {
@@ -143,10 +143,6 @@ public class WorkflowLogger {
         trackedRuns.removeAll(activeSet);
 
         for (WorkflowRun completedRun : trackedRuns) {
-            // Fetch final state (needed for 'conclusion')
-            // Note: You might need to refresh the object if 'activeWorkflows' list didn't contain the completed version
-            // But usually, if it disappears from active, we treat it as done.
-            // Ideally, fetch the single run one last time to get the final 'conclusion' enum.
             WorkflowRun finalStateRun = api.getWorkflowRunById(completedRun.getId());
 
             if (finalStateRun != null) {
@@ -163,9 +159,6 @@ public class WorkflowLogger {
         for (WorkflowJob currentJob : currentJobs) {
             WorkflowJob lastKnownJob = cachedJobs.get(currentJob.getId());
 
-            // FIX 1: Handle New Jobs (Matrix expansion)
-            // If the job wasn't in our map last time, it's new.
-            // Original code crashed here because lastKnownJob was null.
             if (lastKnownJob == null) {
                 printWorkflowJob(currentJob);
                 cachedJobs.put(currentJob.getId(), currentJob);
@@ -173,17 +166,14 @@ public class WorkflowLogger {
                 if (currentJob.getStatus() == Status.IN_PROGRESS) {
                     currentJob.getSortedSteps().forEach(this::printWorkflowJobStep);
                 }
-                continue; // Skip the comparison logic for this loop
+                continue;
             }
 
-            // Check for Status Change
             if (currentJob.getStatus() != lastKnownJob.getStatus()) {
                 printWorkflowJob(currentJob);
                 cachedJobs.put(currentJob.getId(), currentJob);
             }
 
-            // FIX 2: Handle Dynamic Steps
-            // We map the OLD steps by their Number (ID) for easy lookup.
             Map<Integer, JobStep> oldStepMap = lastKnownJob.getSortedSteps().stream()
                     .collect(Collectors.toMap(JobStep::getNumber, Function.identity()));
 
@@ -201,7 +191,7 @@ public class WorkflowLogger {
                 }
             }
 
-            // Update the cache with the fresh job object (containing the new steps list)
+            // Update the cache with the fresh job object
             cachedJobs.put(currentJob.getId(), currentJob);
         }
     }
@@ -210,16 +200,21 @@ public class WorkflowLogger {
         StringBuilder queuedStr = new StringBuilder();
         Workflow assosiatedWorkflow = existingWorkflows.get(workflowRun.getWorkflowId());
         queuedStr.append("[Workflow] ").append(assosiatedWorkflow.getName()).append("\n");
-        queuedStr.append("[RUN ")
-                .append(workflowRun.getStatus());
-                queuedStr.append("] ")
-                .append(workflowRun.getName())
-                .append(" ")
-                .append("Branch: ")
-                .append(workflowRun.getHeadBranch())
-                .append(" ")
-                .append("Commit: ")
-                .append(workflowRun.getHeadSha());
+        queuedStr.append(workflowRun.getUpdatedAt() == null ? workflowRun.getCreatedAt() : workflowRun.getUpdatedAt())
+                .append(" [RUN ");
+        if (workflowRun.getStatus() == Status.COMPLETED) {
+            queuedStr.append(workflowRun.getConclusion());
+        } else {
+            queuedStr.append(workflowRun.getStatus());
+        }
+        queuedStr.append("] ")
+        .append(workflowRun.getName())
+        .append(" ")
+        .append("Branch: ")
+        .append(workflowRun.getHeadBranch())
+        .append(" ")
+        .append("Commit: ")
+        .append(workflowRun.getHeadSha());
         System.out.println(queuedStr);
     }
 
@@ -255,8 +250,7 @@ public class WorkflowLogger {
             queuedStr.append(job.getStatus());
         }
         queuedStr.append("] ")
-        .append(job.getName())
-        .append("\n");
+        .append(job.getName());
 
         System.out.println(queuedStr);
     }
@@ -275,8 +269,7 @@ public class WorkflowLogger {
             queuedStr.append(step.getStatus());
         }
         queuedStr.append("] ")
-        .append(step.getName())
-        .append("\n");
+        .append(step.getName());
         System.out.println(queuedStr);
     }
 

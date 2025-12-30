@@ -1,5 +1,6 @@
 package org.example;
 
+import org.example.api.ApiDataRetriever;
 import org.example.db.Repository;
 import org.example.logic.WorkflowLogger;
 
@@ -34,12 +35,9 @@ public class App {
 
         System.out.println("Starting workflow logger for " + owner + "/" + repo);
 
-        WorkflowLogger logger = new WorkflowLogger(repo, owner, token);
+        WorkflowLogger logger = new WorkflowLogger(new ApiDataRetriever(repo, owner, token));
         try {
-            // Logic to register shutdown hook for clean exit
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                System.out.println("\nShutting down...");
-            }));
+            logger.registerShutdownHook();
 
             if (Repository.exists(repo, owner)) {
                 logger.handleExistingRepository(Repository.getConnectedAt(repo, owner));
@@ -47,6 +45,7 @@ public class App {
                 Repository.add(repo, owner);
                 logger.handleNewRepository();
             }
+            logger.startPolling();
         } catch (Exception e) {
             e.printStackTrace();
         }

@@ -10,7 +10,10 @@ repositories {
 
 dependencies {
     // Use JUnit test framework.
-    testImplementation libs.junit
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.0"
+    testImplementation "org.mockito:mockito-core:5.10.0"
+    testImplementation "org.mockito:mockito-inline:5.2.0" // For mocking static methods like Repository.updateTimestamp
+    testImplementation "org.wiremock:wiremock-standalone:3.3.1"
 
     // This dependency is used by the application.
     implementation libs.guava
@@ -31,4 +34,12 @@ java {
 application {
     // Define the main class for the application.
     mainClass = 'org.example.App'
+}
+
+test {
+    useJUnitPlatform()
+
+    testLogging {
+        events "passed", "skipped", "failed"
+    }
 }
