@@ -122,6 +122,8 @@ public class WorkflowLogger {
     protected void checkForChanges() throws Exception {
         OffsetDateTime oldest = this.oldestNotCompletedJobTimestamp;
         List<WorkflowRun> workflowRuns = api.getWorkflowRunsFrom(oldest.toString());
+        workflowRuns.sort(Comparator.comparing(workflowRun -> workflowRun.getUpdatedAt() == null
+                ? workflowRun.getCreatedAt() : workflowRun.getUpdatedAt()));
         this.oldestNotCompletedJobTimestamp = getOldestActiveRunTimestamp(workflowRuns);
 
         for (WorkflowRun run : workflowRuns) {
