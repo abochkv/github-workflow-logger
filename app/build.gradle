@@ -45,3 +45,20 @@ test {
         events "passed", "skipped", "failed"
     }
 }
+
+tasks.register('fatJar', Jar) {
+    group = 'build'
+    archiveClassifier = 'all'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    manifest {
+        attributes 'Main-Class': application.mainClass
+    }
+
+    from sourceSets.main.output
+
+    dependsOn configurations.runtimeClasspath
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}

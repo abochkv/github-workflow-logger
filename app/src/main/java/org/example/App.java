@@ -42,7 +42,7 @@ public class App {
 
             if (Repository.exists(repo, owner)) {
                 RepoMetadata metadata = Repository.getConnectedAt(repo, owner);
-                logger.handleExistingRepository(metadata.connectedAt(), metadata.lastNotCompletedWorkflowRunTimestamp());
+                logger.handleExistingRepository(metadata.connectedAt());
             } else {
                 Repository.add(repo, owner);
                 logger.handleNewRepository();

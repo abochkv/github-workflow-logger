@@ -27,7 +27,7 @@ class WorkflowLoggerTest {
 
         repositoryMock = mockStatic(Repository.class);
         repositoryMock.when(() ->
-                Repository.updateTimestamp(any(), any(), any(), any())
+                Repository.updateTimestamp(any(), any(), any())
         ).thenAnswer(inv -> null);
 
         Workflow wf = mock(Workflow.class);
@@ -60,7 +60,7 @@ class WorkflowLoggerTest {
 
         verify(api).getWorkflowRunsFrom(anyString());
         repositoryMock.verify(() ->
-                Repository.updateTimestamp(any(), any(), any(), any())
+                Repository.updateTimestamp(any(), any(), any())
         );
     }
 
@@ -80,8 +80,7 @@ class WorkflowLoggerTest {
                 .thenReturn(List.of());
 
         logger.handleExistingRepository(
-                OffsetDateTime.now().minusDays(1).toString(),
-                OffsetDateTime.now().minusDays(2).toString()
+                OffsetDateTime.now().minusDays(1).toString()
         );
 
         verify(api).getJobsForWorkflowRun(11L);

@@ -25,8 +25,8 @@ public class Repository {
 
     public static void add(String repo, String owner) {
         String sql = """
-            INSERT OR IGNORE INTO connected_repos (repo, connected_at, last_not_completed_workflow_run_timestamp)
-            VALUES (?, ?, ?)
+            INSERT OR IGNORE INTO connected_repos (repo, connected_at)
+            VALUES (?, ?)
         """;
 
         try (Connection conn = Database.getConnection();
@@ -34,7 +34,6 @@ public class Repository {
 
             ps.setString(1, repo + "/" + owner);
             ps.setString(2, Instant.now().toString());
-            ps.setString(3, Instant.now().toString());
             ps.executeUpdate();
 
         } catch (Exception e) {
@@ -43,7 +42,7 @@ public class Repository {
     }
 
     public static RepoMetadata getConnectedAt(String repo, String owner) {
-        String sql = "SELECT connected_at, last_not_completed_workflow_run_timestamp FROM connected_repos WHERE repo = ?";
+        String sql = "SELECT connected_at FROM connected_repos WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -52,8 +51,7 @@ public class Repository {
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return new RepoMetadata(
-                            rs.getString("connected_at"),
-                            rs.getString("last_not_completed_workflow_run_timestamp")
+                            rs.getString("connected_at")
                     );
                 }
             }
@@ -64,15 +62,14 @@ public class Repository {
         }
     }
 
-    public static void updateTimestamp(String repo, String owner, OffsetDateTime lastPolled, OffsetDateTime timestamp) {
-        String sql = "UPDATE connected_repos SET connected_at = ?, last_not_completed_workflow_run_timestamp = ? WHERE repo = ?";
+    public static void updateTimestamp(String repo, String owner, OffsetDateTime lastPolled) {
+        String sql = "UPDATE connected_repos SET connected_at = ? WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, lastPolled.toString());
-            ps.setString(2, timestamp.toString());
-            ps.setString(3, repo + "/" + owner);
+            ps.setString(2, repo + "/" + owner);
 
             ps.executeUpdate();
 
