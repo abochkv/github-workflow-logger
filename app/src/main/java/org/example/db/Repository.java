@@ -25,8 +25,8 @@ public class Repository {
 
     public static void add(String repo, String owner) {
         String sql = """
-            INSERT INTO connected_repos (repo, last_not_completed_workflow_run_timestamp)
-            VALUES (?, ?)
+            INSERT INTO connected_repos (repo, last_not_completed_workflow_run_timestamp, last_logged_item_timestamp)
+            VALUES (?, ?, ?)
         """;
 
         try (Connection conn = Database.getConnection();
@@ -34,6 +34,7 @@ public class Repository {
 
             ps.setString(1, repo + "/" + owner);
             ps.setString(2, OffsetDateTime.now().toString());
+            ps.setString(3, OffsetDateTime.MIN.toString());
             ps.executeUpdate();
 
         } catch (Exception e) {
@@ -43,7 +44,7 @@ public class Repository {
     }
 
     public static RepoMetadata getConnectedAt(String repo, String owner) {
-        String sql = "SELECT last_not_completed_workflow_run_timestamp FROM connected_repos WHERE repo = ?";
+        String sql = "SELECT last_not_completed_workflow_run_timestamp, last_logged_item_timestamp FROM connected_repos WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -52,7 +53,8 @@ public class Repository {
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return new RepoMetadata(
-                            rs.getString("last_not_completed_workflow_run_timestamp")
+                            rs.getString("last_not_completed_workflow_run_timestamp"),
+                            rs.getString("last_logged_item_timestamp")
                     );
                 }
             }
@@ -63,14 +65,15 @@ public class Repository {
         }
     }
 
-    public static void updateTimestamp(String repo, String owner, OffsetDateTime lastPolled) {
-        String sql = "UPDATE connected_repos SET last_not_completed_workflow_run_timestamp = ? WHERE repo = ?";
+    public static void updateTimestamp(String repo, String owner, OffsetDateTime lastNotCompletedWorkflowRunTimestamp, OffsetDateTime lastPolled) {
+        String sql = "UPDATE connected_repos SET last_not_completed_workflow_run_timestamp = ?, last_logged_item_timestamp = ? WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, lastPolled.toString());
-            ps.setString(2, repo + "/" + owner);
+            ps.setString(1, lastNotCompletedWorkflowRunTimestamp.toString());
+            ps.setString(2, lastPolled.toString());
+            ps.setString(3, repo + "/" + owner);
 
             ps.executeUpdate();
 
