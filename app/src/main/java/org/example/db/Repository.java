@@ -3,7 +3,6 @@ package org.example.db;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.time.Instant;
 import java.time.OffsetDateTime;
 
 public class Repository {
@@ -19,13 +18,14 @@ public class Repository {
             return rs.next();
 
         } catch (Exception e) {
+            e.printStackTrace();
             throw new RuntimeException(e);
         }
     }
 
     public static void add(String repo, String owner) {
         String sql = """
-            INSERT OR IGNORE INTO connected_repos (repo, connected_at)
+            INSERT INTO connected_repos (repo, last_not_completed_workflow_run_timestamp)
             VALUES (?, ?)
         """;
 
@@ -33,16 +33,17 @@ public class Repository {
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, repo + "/" + owner);
-            ps.setString(2, Instant.now().toString());
+            ps.setString(2, OffsetDateTime.now().toString());
             ps.executeUpdate();
 
         } catch (Exception e) {
+            e.printStackTrace();
             throw new RuntimeException(e);
         }
     }
 
     public static RepoMetadata getConnectedAt(String repo, String owner) {
-        String sql = "SELECT connected_at FROM connected_repos WHERE repo = ?";
+        String sql = "SELECT last_not_completed_workflow_run_timestamp FROM connected_repos WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -51,7 +52,7 @@ public class Repository {
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return new RepoMetadata(
-                            rs.getString("connected_at")
+                            rs.getString("last_not_completed_workflow_run_timestamp")
                     );
                 }
             }
@@ -63,7 +64,7 @@ public class Repository {
     }
 
     public static void updateTimestamp(String repo, String owner, OffsetDateTime lastPolled) {
-        String sql = "UPDATE connected_repos SET connected_at = ? WHERE repo = ?";
+        String sql = "UPDATE connected_repos SET last_not_completed_workflow_run_timestamp = ? WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {

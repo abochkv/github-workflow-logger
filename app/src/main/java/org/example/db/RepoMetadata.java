@@ -1,3 +1,3 @@
 package org.example.db;
 
-public record RepoMetadata(String connectedAt) {}
+public record RepoMetadata(String lastNotCompletedWorkflowRunTimestamp) {}

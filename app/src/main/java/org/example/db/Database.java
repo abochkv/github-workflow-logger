@@ -26,7 +26,6 @@ final class Database {
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS connected_repos (
                     repo TEXT PRIMARY KEY,
-                    connected_at TEXT NOT NULL,
                     last_not_completed_workflow_run_timestamp TEXT NOT NULL
                 )
             """);
