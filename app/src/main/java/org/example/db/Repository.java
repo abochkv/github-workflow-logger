@@ -7,7 +7,7 @@ import java.time.OffsetDateTime;
 
 public class Repository {
 
-    public static boolean exists(String repo, String owner) {
+    public boolean exists(String repo, String owner) {
         String sql = "SELECT 1 FROM connected_repos WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
@@ -23,7 +23,7 @@ public class Repository {
         }
     }
 
-    public static void add(String repo, String owner) {
+    public void add(String repo, String owner) {
         String sql = """
             INSERT INTO connected_repos (repo, last_not_completed_workflow_run_timestamp, last_logged_item_timestamp)
             VALUES (?, ?, ?)
@@ -43,7 +43,7 @@ public class Repository {
         }
     }
 
-    public static RepoMetadata getConnectedAt(String repo, String owner) {
+    public RepoMetadata getConnectedAt(String repo, String owner) {
         String sql = "SELECT last_not_completed_workflow_run_timestamp, last_logged_item_timestamp FROM connected_repos WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();
@@ -65,7 +65,7 @@ public class Repository {
         }
     }
 
-    public static void updateTimestamp(String repo, String owner, OffsetDateTime lastNotCompletedWorkflowRunTimestamp, OffsetDateTime lastPolled) {
+    public void updateTimestamp(String repo, String owner, OffsetDateTime lastNotCompletedWorkflowRunTimestamp, OffsetDateTime lastPolled) {
         String sql = "UPDATE connected_repos SET last_not_completed_workflow_run_timestamp = ?, last_logged_item_timestamp = ? WHERE repo = ?";
 
         try (Connection conn = Database.getConnection();

@@ -4,8 +4,10 @@ import org.example.api.ApiDataRetriever;
 import org.example.db.Repository;
 import org.example.model.*;
 
+import java.io.PrintStream;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.function.Function;
@@ -19,14 +21,19 @@ public class WorkflowLogger {
     private final Set<Long> queuedWorkflowRuns = new HashSet<>();
     private final Set<Long> completedWorkflowRunIds = new HashSet<>();
     private final Map<WorkflowRun, Map<Long, WorkflowJob>> activeWorkflowRuns = new HashMap<>();
+    private final Repository repo;
+    private final PrintStream out;
 
     private OffsetDateTime oldestNotCompletedJobTimestamp;
     private OffsetDateTime lastLoggedTimestamp;
     private final DateTimeFormatter logTimeFormat =
-            DateTimeFormatter.ofLocalizedPattern("yyyy-MM-dd HH:mm:ss");
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private final ZoneId zoneId = ZoneId.systemDefault();
 
-    public WorkflowLogger(ApiDataRetriever api) {
+    public WorkflowLogger(ApiDataRetriever api, Repository repo, PrintStream out) {
         this.api = api;
+        this.repo = repo;
+        this.out = out;
         initWorkflows();
     }
 
@@ -86,73 +93,17 @@ public class WorkflowLogger {
         updateTimestamp(lastLoggedTimestamp);
     }
 
-    private void logWorkflowRunIfNeeded(WorkflowRun workflowRun, OffsetDateTime lastLoggedTimestamp, List<WorkflowJob> jobs) {
-        if (workflowRun.getUpdatedAt() != null && workflowRun.getUpdatedAt().isAfter(lastLoggedTimestamp)) {
-            if (jobs != null) {
-                printCompletedWorkflow(workflowRun, jobs);
-            } else {
-                printWorkflowRun(workflowRun);
-            }
-        }  else if (workflowRun.getCreatedAt() != null && workflowRun.getCreatedAt().isAfter(lastLoggedTimestamp)) {
-            if (jobs != null) {
-                printCompletedWorkflow(workflowRun, jobs);
-            } else {
-                printWorkflowRun(workflowRun);
-            }
-        }
-    }
-
-    private void updateLastLoggedTimestampWorkflowRun(WorkflowRun workflowRun) {
-        if (workflowRun.getUpdatedAt() != null && workflowRun.getUpdatedAt().isAfter(this.lastLoggedTimestamp)) {
-            this.lastLoggedTimestamp = workflowRun.getUpdatedAt();
-        } else if (workflowRun.getCreatedAt() != null && workflowRun.getCreatedAt().isAfter(this.lastLoggedTimestamp)) {
-            this.lastLoggedTimestamp = workflowRun.getCreatedAt();
-        }
-    }
-
-    private void updateLastLoggedTimestampJob(WorkflowJob job) {
-        if (job.getCompletedAt() != null && job.getCompletedAt().isAfter(this.lastLoggedTimestamp))
-            this.lastLoggedTimestamp = job.getCompletedAt();
-        else if (job.getStartedAt() != null && job.getStartedAt().isAfter(this.lastLoggedTimestamp))
-            this.lastLoggedTimestamp = job.getStartedAt();
-        else if (job.getCreatedAt() != null && job.getCreatedAt().isAfter(this.lastLoggedTimestamp))
-            this.lastLoggedTimestamp = job.getCreatedAt();
-    }
-
-    private void logJobIfNeeded(WorkflowJob job, OffsetDateTime lastLoggedTimestamp) {
-        if (job.getCompletedAt() != null && job.getCompletedAt().isAfter(lastLoggedTimestamp))
-            printWorkflowJob(job, true, true);
-        else if (job.getStartedAt() != null && job.getStartedAt().isAfter(lastLoggedTimestamp))
-            printWorkflowJob(job, true, false);
-        else if (job.getCreatedAt() != null && job.getCreatedAt().isAfter(lastLoggedTimestamp))
-            printWorkflowJob(job, false, false);
-    }
-
-    private void updateTimestamp(OffsetDateTime lastLoggedTimestamp) {
-        this.lastLoggedTimestamp = lastLoggedTimestamp;
-        Repository.updateTimestamp(api.repo, api.owner, this.oldestNotCompletedJobTimestamp, this.lastLoggedTimestamp);
-    }
-
-    private OffsetDateTime getOldestActiveRunTimestamp(List<WorkflowRun> workflowRuns) {
-        OffsetDateTime time = workflowRuns.stream()
-                .filter(r -> r.getStatus() != Status.COMPLETED)
-                .map(WorkflowRun::getCreatedAt)
-                .min(Comparator.naturalOrder())
-                .orElse(this.oldestNotCompletedJobTimestamp);
-        return time == null ? OffsetDateTime.now() : time;
-    }
-
     public void startPolling() throws Exception {
         pollingMode();
     }
 
     private void pollingMode() throws Exception {
-        System.out.println("Started polling for changes (Press Ctrl+C to stop)...");
+        out.println("Started polling for changes (Press Ctrl+C to stop)...");
         while (running) {
             try {
                 checkForChanges();
             } catch (Exception e) {
-                System.err.println("Error during poll: " + e.getMessage());
+                out.println("Error during poll: " + e.getMessage());
                 e.printStackTrace();
             }
 
@@ -229,7 +180,7 @@ public class WorkflowLogger {
     private void checkForJobUpdatesForWorkflowRun(WorkflowRun workflowRun, List<WorkflowJob> currentJobs) throws Exception {
         if (currentJobs == null)
             currentJobs = api.getJobsForWorkflowRun(workflowRun.getId());
-        Map<Long, WorkflowJob> cachedJobs = this.activeWorkflowRuns.get(workflowRun);
+        Map<Long, WorkflowJob> cachedJobs = this.activeWorkflowRuns.getOrDefault(workflowRun, new HashMap<>());
         boolean runWasPrinted = false;
 
         for (WorkflowJob currentJob : currentJobs) {
@@ -323,15 +274,15 @@ public class WorkflowLogger {
 
         String details = String.format(
                 "%s [RUN %s] %s | Branch: %s | Commit: %s",
-                timestamp.format(logTimeFormat),
+                timestamp.atZoneSameInstant(zoneId).format(logTimeFormat),
                 statusDisplay.toUpperCase(),
                 workflowRun.getName(),
                 workflowRun.getHeadBranch(),
                 workflowRun.getHeadSha()
         );
 
-        System.out.println(header);
-        System.out.println(details);
+        out.println(header);
+        out.println(details);
     }
 
     private void printCompletedWorkflow(WorkflowRun run, List<WorkflowJob> jobs) {
@@ -339,13 +290,13 @@ public class WorkflowLogger {
 
         Conclusion conclusion = run.getConclusion();
         if (Conclusion.FAILURE.equals(conclusion) || Conclusion.TIMED_OUT.equals(conclusion)) {
-            System.out.println("   FAILURE SUMMARY:");
+            out.println("   FAILURE SUMMARY:");
             jobs.stream()
                     .filter(j -> List.of(Conclusion.FAILURE, Conclusion.TIMED_OUT, Conclusion.STARTUP_FAILURE)
                             .contains(j.getConclusion()))
                     .forEach(job -> printWorkflowJob(job, true, false));
         } else if (Conclusion.ACTION_REQUIRED.equals(conclusion)) {
-            System.out.println("   -> Action Required: " + run.getHtmlUrl());
+            out.println("   -> Action Required: " + run.getHtmlUrl());
         }
     }
 
@@ -358,9 +309,9 @@ public class WorkflowLogger {
         String statusDisplay = ((job.getStatus() == Status.COMPLETED) ? job.getConclusion() : job.getStatus()).toString();
 
         // 3. Print Job line (indented for hierarchy)
-        System.out.println(String.format(
+        out.println(String.format(
                 "  %s [Job %s] %s",
-                timestamp.format(logTimeFormat),
+                timestamp.atZoneSameInstant(zoneId).format(logTimeFormat),
                 statusDisplay.toUpperCase(),
                 job.getName()
         ));
@@ -389,9 +340,9 @@ public class WorkflowLogger {
         String statusDisplay = ((step.getStatus() == Status.COMPLETED) ? step.getConclusion() : step.getStatus()).toString();
 
         // 4. Print Step line (further indented)
-        System.out.println(String.format(
+        out.println(String.format(
                 "    %s [Step %s] %s",
-                timestamp.format(logTimeFormat),
+                timestamp.atZoneSameInstant(zoneId).format(logTimeFormat),
                 statusDisplay.toUpperCase(),
                 step.getName()
         ));
@@ -406,5 +357,61 @@ public class WorkflowLogger {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private void logWorkflowRunIfNeeded(WorkflowRun workflowRun, OffsetDateTime lastLoggedTimestamp, List<WorkflowJob> jobs) {
+        if (workflowRun.getUpdatedAt() != null && workflowRun.getUpdatedAt().isAfter(lastLoggedTimestamp)) {
+            if (jobs != null) {
+                printCompletedWorkflow(workflowRun, jobs);
+            } else {
+                printWorkflowRun(workflowRun);
+            }
+        }  else if (workflowRun.getCreatedAt() != null && workflowRun.getCreatedAt().isAfter(lastLoggedTimestamp)) {
+            if (jobs != null) {
+                printCompletedWorkflow(workflowRun, jobs);
+            } else {
+                printWorkflowRun(workflowRun);
+            }
+        }
+    }
+
+    private void updateLastLoggedTimestampWorkflowRun(WorkflowRun workflowRun) {
+        if (workflowRun.getUpdatedAt() != null && workflowRun.getUpdatedAt().isAfter(this.lastLoggedTimestamp)) {
+            this.lastLoggedTimestamp = workflowRun.getUpdatedAt();
+        } else if (workflowRun.getCreatedAt() != null && workflowRun.getCreatedAt().isAfter(this.lastLoggedTimestamp)) {
+            this.lastLoggedTimestamp = workflowRun.getCreatedAt();
+        }
+    }
+
+    private void updateLastLoggedTimestampJob(WorkflowJob job) {
+        if (job.getCompletedAt() != null && job.getCompletedAt().isAfter(this.lastLoggedTimestamp))
+            this.lastLoggedTimestamp = job.getCompletedAt();
+        else if (job.getStartedAt() != null && job.getStartedAt().isAfter(this.lastLoggedTimestamp))
+            this.lastLoggedTimestamp = job.getStartedAt();
+        else if (job.getCreatedAt() != null && job.getCreatedAt().isAfter(this.lastLoggedTimestamp))
+            this.lastLoggedTimestamp = job.getCreatedAt();
+    }
+
+    private void logJobIfNeeded(WorkflowJob job, OffsetDateTime lastLoggedTimestamp) {
+        if (job.getCompletedAt() != null && job.getCompletedAt().isAfter(lastLoggedTimestamp))
+            printWorkflowJob(job, true, true);
+        else if (job.getStartedAt() != null && job.getStartedAt().isAfter(lastLoggedTimestamp))
+            printWorkflowJob(job, true, false);
+        else if (job.getCreatedAt() != null && job.getCreatedAt().isAfter(lastLoggedTimestamp))
+            printWorkflowJob(job, false, false);
+    }
+
+    private void updateTimestamp(OffsetDateTime lastLoggedTimestamp) {
+        this.lastLoggedTimestamp = lastLoggedTimestamp;
+        this.repo.updateTimestamp(api.repo, api.owner, this.oldestNotCompletedJobTimestamp, this.lastLoggedTimestamp);
+    }
+
+    private OffsetDateTime getOldestActiveRunTimestamp(List<WorkflowRun> workflowRuns) {
+        OffsetDateTime time = workflowRuns.stream()
+                .filter(r -> r.getStatus() != Status.COMPLETED)
+                .map(WorkflowRun::getCreatedAt)
+                .min(Comparator.naturalOrder())
+                .orElse(this.oldestNotCompletedJobTimestamp);
+        return time == null ? OffsetDateTime.now() : time;
     }
 }

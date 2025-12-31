@@ -35,16 +35,16 @@ public class App {
         final String repo = parts[1];
 
         System.out.println("Starting workflow logger for " + owner + "/" + repo);
-
-        WorkflowLogger logger = new WorkflowLogger(new ApiDataRetriever(repo, owner, token));
+        Repository repository = new Repository();
+        WorkflowLogger logger = new WorkflowLogger(new ApiDataRetriever(repo, owner, token), repository, System.out);
         try {
             logger.registerShutdownHook();
 
-            if (Repository.exists(repo, owner)) {
-                RepoMetadata metadata = Repository.getConnectedAt(repo, owner);
+            if (repository.exists(repo, owner)) {
+                RepoMetadata metadata = repository.getConnectedAt(repo, owner);
                 logger.handleExistingRepository(metadata.lastNotCompletedWorkflowRunTimestamp(), metadata.lastLoggedItemTimestamp());
             } else {
-                Repository.add(repo, owner);
+                repository.add(repo, owner);
                 logger.handleNewRepository();
             }
             logger.startPolling();
